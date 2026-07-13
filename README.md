@@ -320,12 +320,18 @@ the backslash must be the final character on that line with no spaces after it;
 otherwise `scp` may report `stat local " ": No such file or directory` even
 after the intended file was copied.
 
+If your prompt looks like `user@raspberrypi:~/LabGate$`, stop here: Option A is
+the correct path. Do not run the `/tmp/labgate-provisioner.pub` relay commands
+from Option B on the Pi. Also replace `labadmin` with the real administrator
+username on the destination; for example, use `mashiro@...` if that is the
+account that exists there.
+
 #### Option B: Copy from another Linux or macOS computer
 
 Install Git and the OpenSSH client on the operator computer. Clone the public
 repository, fetch the public key from the Pi, and forward both items to the lab
 machine. Replace `piadmin` and `/path/to/LabGate` with the actual Pi account and
-repository path:
+repository path. Use this relay only when the current computer is not the Pi:
 
 ```sh
 git clone https://github.com/tantaihaha4487/LabGate.git
