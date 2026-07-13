@@ -26,6 +26,10 @@ are checked.
   publicly callable token-minting endpoint.
 - Changed the default credential lifetime to five minutes and made the local
   cleanup backstop lock issued credentials even when no PAM session was opened.
+- Expired, unused reservations now require a confirmed guest-account lock before
+  a healthy machine is released; the credential page shows the server expiry
+  countdown, and guest password length is configurable with an 8-character
+  default.
 
 ## Blockers
 

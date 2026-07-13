@@ -15,6 +15,17 @@ interface IssuedCredential {
   username: "guest";
   password: string;
   expiresAt: string;
+  serverTime: string;
+}
+
+interface DisplayCredential extends IssuedCredential {
+  machineId: string;
+}
+
+interface ExpirationState {
+  machineId: string;
+  status: "locking" | "released";
+  message?: string;
 }
 
 const statusStyles: Record<MachineStatus, string> = {
@@ -23,12 +34,27 @@ const statusStyles: Record<MachineStatus, string> = {
   offline: "bg-slate-200 text-slate-600",
 };
 
+function formatCountdown(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const minuteAndSecond = `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+
+  return hours > 0
+    ? `${hours.toString().padStart(2, "0")}:${minuteAndSecond}`
+    : minuteAndSecond;
+}
+
 export function MachinePicker({ initialMachines }: { initialMachines: Machine[] }) {
   const [machines, setMachines] = useState<Machine[]>(initialMachines);
   const [loading, setLoading] = useState(false);
   const [pendingId, setPendingId] = useState<string>();
   const [error, setError] = useState<string>();
-  const [credential, setCredential] = useState<IssuedCredential>();
+  const [credential, setCredential] = useState<DisplayCredential>();
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
+  const [expiration, setExpiration] = useState<ExpirationState>();
+  const expirationMachineId = expiration?.machineId;
+  const expirationStatus = expiration?.status;
 
   const loadMachines = useCallback(async (background = false) => {
     if (!background) {
@@ -60,6 +86,87 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
     return () => window.clearInterval(refreshInterval);
   }, [loadMachines]);
 
+  useEffect(() => {
+    if (!credential) {
+      return;
+    }
+
+    const initialRemainingMilliseconds =
+      new Date(credential.expiresAt).getTime() -
+      new Date(credential.serverTime).getTime();
+    const countdownStartedAt = Date.now();
+    const countdownInterval = window.setInterval(() => {
+      const remainingMilliseconds =
+        initialRemainingMilliseconds - (Date.now() - countdownStartedAt);
+
+      if (remainingMilliseconds <= 0) {
+        window.clearInterval(countdownInterval);
+        setRemainingSeconds(0);
+        setExpiration({ machineId: credential.machineId, status: "locking" });
+        setCredential(undefined);
+        return;
+      }
+
+      setRemainingSeconds(Math.ceil(remainingMilliseconds / 1_000));
+    }, 250);
+
+    return () => window.clearInterval(countdownInterval);
+  }, [credential]);
+
+  useEffect(() => {
+    if (!expirationMachineId || expirationStatus !== "locking") {
+      return;
+    }
+
+    const machineId = expirationMachineId;
+    let cancelled = false;
+    let retryTimeout: number | undefined;
+
+    async function lockExpiredCredential() {
+      try {
+        const response = await fetch("/api/checkout/expire", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ machineId }),
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        if (response.ok) {
+          setExpiration({ machineId, status: "released" });
+          await loadMachines(true);
+          return;
+        }
+      } catch {
+        // The durable server and machine timers still enforce expiration.
+      }
+
+      if (cancelled) {
+        return;
+      }
+
+      setExpiration({
+        machineId,
+        status: "locking",
+        message: "Lock confirmation is pending. LabGate will retry automatically.",
+      });
+      retryTimeout = window.setTimeout(() => {
+        void lockExpiredCredential();
+      }, 5_000);
+    }
+
+    void lockExpiredCredential();
+
+    return () => {
+      cancelled = true;
+      if (retryTimeout !== undefined) {
+        window.clearTimeout(retryTimeout);
+      }
+    };
+  }, [expirationMachineId, expirationStatus, loadMachines]);
+
   async function checkout(machineId: string) {
     setPendingId(machineId);
     setError(undefined);
@@ -78,8 +185,29 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
       return;
     }
 
-    setCredential(data);
+    const expiresAtMilliseconds = new Date(data.expiresAt).getTime();
+    const serverTimeMilliseconds = new Date(data.serverTime).getTime();
+    const initialRemainingMilliseconds =
+      expiresAtMilliseconds - serverTimeMilliseconds;
+
     setPendingId(undefined);
+
+    if (initialRemainingMilliseconds <= 0) {
+      setRemainingSeconds(0);
+      setCredential(undefined);
+      setExpiration({ machineId, status: "locking" });
+      await loadMachines();
+      return;
+    }
+
+    setRemainingSeconds(
+      Math.ceil(initialRemainingMilliseconds / 1_000),
+    );
+    setExpiration(undefined);
+    setCredential({
+      ...data,
+      machineId,
+    });
     await loadMachines();
   }
 
@@ -90,6 +218,16 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
         <h2 className="mt-1 text-2xl font-bold text-slate-950">
           Copy this now—it will not be shown again.
         </h2>
+        <div
+          role="timer"
+          aria-label={`${remainingSeconds} seconds until this credential expires`}
+          className="mt-5 flex items-center justify-between rounded-xl border border-amber-300 bg-amber-50 px-5 py-4"
+        >
+          <span className="font-semibold text-amber-950">Time remaining</span>
+          <span className="font-mono text-2xl font-bold tabular-nums text-amber-950">
+            {formatCountdown(remainingSeconds)}
+          </span>
+        </div>
         <dl className="mt-6 grid grid-cols-[auto_1fr] gap-x-5 gap-y-3 rounded-xl bg-slate-950 p-5 font-mono text-white">
           <dt className="text-slate-400">Username</dt>
           <dd>{credential.username}</dd>
@@ -102,6 +240,49 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
           Type these credentials at the physical Ubuntu machine. This is not a
           remote desktop connection.
         </p>
+        <p className="mt-2 text-sm font-semibold text-amber-900">
+          At 00:00 the password is hidden, the guest account is locked, and the
+          reservation is released.
+        </p>
+      </section>
+    );
+  }
+
+  if (expiration) {
+    const released = expiration.status === "released";
+
+    return (
+      <section
+        aria-live="polite"
+        className={`mt-8 max-w-xl rounded-2xl border p-6 shadow-sm ${
+          released
+            ? "border-emerald-300 bg-emerald-50"
+            : "border-amber-300 bg-amber-50"
+        }`}
+      >
+        <p className="font-semibold text-slate-900">
+          {released ? "Credential expired" : "Credential expired—locking guest"}
+        </p>
+        <h2 className="mt-1 text-2xl font-bold text-slate-950">
+          {released
+            ? "The password is inactive and the machine is available."
+            : "The password has been removed from this page."}
+        </h2>
+        <p className="mt-4 text-sm text-slate-700">
+          {expiration.message ??
+            (released
+              ? "You may return to the machine list and make a new reservation."
+              : "Waiting for the lab machine to confirm that the guest account is locked.")}
+        </p>
+        {released ? (
+          <button
+            type="button"
+            onClick={() => setExpiration(undefined)}
+            className="mt-6 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500"
+          >
+            Return to machines
+          </button>
+        ) : null}
       </section>
     );
   }

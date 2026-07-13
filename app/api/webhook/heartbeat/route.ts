@@ -10,22 +10,26 @@ export async function POST(request: Request) {
   }
 
   const now = new Date();
-  const activeCredential = await db.guestCredential.findFirst({
-    where: {
-      machineId: machine.id,
-      revokedAt: null,
-      expiresAt: { gt: now },
-    },
-    select: { id: true },
-  });
-
-  await db.machine.update({
-    where: { id: machine.id },
-    data: {
-      lastHeartbeat: now,
-      status: activeCredential ? "occupied" : "available",
-    },
-  });
+  await db.$transaction([
+    db.machine.update({
+      where: { id: machine.id },
+      data: { lastHeartbeat: now },
+    }),
+    db.machine.updateMany({
+      where: {
+        id: machine.id,
+        guestCredentials: { some: { revokedAt: null } },
+      },
+      data: { status: "occupied" },
+    }),
+    db.machine.updateMany({
+      where: {
+        id: machine.id,
+        guestCredentials: { none: { revokedAt: null } },
+      },
+      data: { status: "available" },
+    }),
+  ]);
 
   return NextResponse.json({ ok: true });
 }

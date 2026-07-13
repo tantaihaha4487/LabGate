@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import test from "node:test";
+import { POST as credentialExpired } from "../app/api/webhook/credential-expired/route";
 import { POST as heartbeat } from "../app/api/webhook/heartbeat/route";
 import { POST as sessionClose } from "../app/api/webhook/session-close/route";
 import { POST as sessionOpen } from "../app/api/webhook/session-open/route";
@@ -39,6 +40,7 @@ test("machine webhooks authenticate, update status, and record session events", 
       "offline",
     );
 
+    assert.equal((await credentialExpired(request(webhookToken))).status, 409);
     assert.equal((await sessionOpen(request("wrong-token-value-that-is-long-enough"))).status, 401);
     assert.equal((await sessionOpen(request(webhookToken))).status, 200);
 
@@ -69,6 +71,61 @@ test("machine webhooks authenticate, update status, and record session events", 
       { event: "session_open" },
       { event: "session_close" },
     ]);
+  } finally {
+    await db.auditLog.deleteMany({ where: { machineId: machine.id } });
+    await db.guestCredential.deleteMany({ where: { machineId: machine.id } });
+    await db.machine.delete({ where: { id: machine.id } });
+  }
+});
+
+test("local expiry confirmation revokes the password metadata and releases the machine", async () => {
+  const suffix = randomUUID();
+  const webhookToken = randomBytes(32).toString("base64url");
+  const machine = await db.machine.create({
+    data: {
+      name: `Credential expiry ${suffix}`,
+      tailscaleIp: "100.64.0.246",
+      webhookToken,
+      status: "occupied",
+      lastHeartbeat: new Date(),
+    },
+  });
+  const credential = await db.guestCredential.create({
+    data: {
+      machineId: machine.id,
+      studentEmail: `expired-${suffix}@ubu.ac.th`,
+      expiresAt: new Date(Date.now() - 60_000),
+    },
+  });
+  const request = (token: string) =>
+    new Request("http://localhost/api/webhook/credential-expired", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+  try {
+    assert.equal((await heartbeat(request(webhookToken))).status, 200);
+    const stillReserved = await db.machine.findUniqueOrThrow({
+      where: { id: machine.id },
+    });
+    assert.equal(stillReserved.status, "occupied");
+
+    assert.equal((await credentialExpired(request("invalid-token-that-is-long-enough-to-parse"))).status, 401);
+    assert.equal((await credentialExpired(request(webhookToken))).status, 200);
+
+    const released = await db.machine.findUniqueOrThrow({
+      where: { id: machine.id },
+    });
+    const revoked = await db.guestCredential.findUniqueOrThrow({
+      where: { id: credential.id },
+    });
+    const audit = await db.auditLog.findFirst({
+      where: { machineId: machine.id, event: "force_revoke" },
+    });
+
+    assert.equal(released.status, "available");
+    assert.ok(revoked.revokedAt);
+    assert.match(audit?.detail ?? "", /Local cleanup timer locked/);
   } finally {
     await db.auditLog.deleteMany({ where: { machineId: machine.id } });
     await db.guestCredential.deleteMany({ where: { machineId: machine.id } });

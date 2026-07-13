@@ -7,9 +7,9 @@ for that machine.
 A checkout rotates and unlocks the one pre-existing `guest` OS account. The
 student types the password at the physical machine; LabGate is not a remote
 desktop service. The password is returned once and is never stored by the web
-application. Logout and the active-session cleanup timer lock the account, and
-`/home/guest` is a temporary in-memory filesystem that is replaced for every
-login.
+application. Logout and the credential cleanup timer lock the account, including
+when a reservation expires before the student ever logs in. `/home/guest` is a
+temporary in-memory filesystem that is replaced for every login.
 
 > [!IMPORTANT]
 > End-to-end validation with real Google credentials and a physical Ubuntu
@@ -160,6 +160,7 @@ ALLOWED_EMAIL_DOMAIN=ubu.ac.th
 DATABASE_URL=file:./data/labgate.db
 PROVISIONER_SSH_KEY_PATH=/run/secrets/provisioner_key
 CREDENTIAL_TTL_HOURS=0.08333333333333333
+GUEST_PASSWORD_LENGTH=8
 MACHINE_REGISTRATION_SECRET=<GENERATED_SECRET_2>
 CRON_SECRET=<GENERATED_SECRET_3>
 ```
@@ -172,6 +173,9 @@ Notes:
   paths for the supplied Compose deployment.
 - `CREDENTIAL_TTL_HOURS` defaults to five minutes (5/60 of an hour). Use the
   matching value `300` for `LABGATE_MAX_TTL_SECONDS` on each lab machine.
+- `GUEST_PASSWORD_LENGTH` defaults to `8`; administrators may set a whole-number
+  length from 8 through 128. The generated value always uses the shell-safe,
+  unambiguous character set from `AGENTS.md`.
 - Never commit `.env.local`, `data/`, or `secrets/`.
 
 ### 6. Start the application
@@ -218,9 +222,11 @@ for student devices that are not enrolled in Tailscale. See the
 
 ### 8. Install the Pi-side recovery sweep
 
-The sweep releases expired credentials if a machine stops reporting activity.
-Install the example in root's crontab and replace the placeholder with the exact
-`CRON_SECRET` value from `.env.local`:
+For a healthy machine, the sweep locks an expired guest password over SSH before
+releasing the reservation. If a machine stops reporting activity, it applies the
+database recovery fallback while the machine's persistent local timer enforces
+the account lock. Install the example in root's crontab and replace the
+placeholder with the exact `CRON_SECRET` value from `.env.local`:
 
 ```sh
 sudo crontab -e
@@ -480,7 +486,9 @@ after reviewing that display manager's PAM flow.
 
 The installer is idempotent. Rerunning it updates scripts, sudoers, PAM, and
 systemd units without creating another guest account. It preserves the existing
-per-machine webhook token.
+per-machine webhook token. The cleanup timer locks expired credentials locally
+before notifying LabGate, and retries that notification if the Pi is temporarily
+unreachable.
 
 ### 5. Verify the machine installation
 
@@ -524,9 +532,9 @@ Complete this test on a non-production machine before rollout:
 9. Test expiration during an open guest session by using a short TTL on a test
    machine. Confirm the local cleanup timer locks the account even if webhooks
    are unavailable.
-10. Test expiration without ever logging in. Confirm the local cleanup timer
-    locks the issued password and the heartbeat returns the machine to the
-    available state.
+10. Test expiration without ever logging in. Confirm the credential page counts
+    down to `00:00`, hides the password, the local cleanup timer locks the issued
+    password, and LabGate returns the machine to the available state.
 11. Simulate a powered-off or disconnected machine and confirm the Pi cron
     sweep eventually revokes the expired credential and releases the machine.
 12. Review the Pi and lab-machine logs for errors.

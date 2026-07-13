@@ -33,9 +33,15 @@ export async function POST(request: Request) {
       studentEmail: session.user.email,
     });
 
-    return NextResponse.json(credential, {
-      headers: { "Cache-Control": "no-store" },
-    });
+    return NextResponse.json(
+      {
+        ...credential,
+        serverTime: new Date().toISOString(),
+      },
+      {
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
   } catch (error: unknown) {
     if (error instanceof CheckoutError) {
       return NextResponse.json(

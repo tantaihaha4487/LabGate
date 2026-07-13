@@ -2,7 +2,7 @@
 set -euo pipefail
 
 export LC_ALL=C
-readonly PASSWORD_PATTERN='^[A-HJ-NP-Za-km-z2-9]{12,128}$'
+readonly PASSWORD_PATTERN='^[A-HJ-NP-Za-km-z2-9]{8,128}$'
 readonly STATE_DIRECTORY=/var/lib/labgate
 readonly ISSUED_TIMESTAMP=${STATE_DIRECTORY}/credential-issued-at
 
