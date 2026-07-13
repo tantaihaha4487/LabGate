@@ -15,14 +15,6 @@ login.
 > End-to-end validation with real Google credentials and a physical Ubuntu
 > Desktop login screen is still outstanding. Read [PROGRESS.md](PROGRESS.md)
 > before treating the system as production-ready.
->
-> There is also a production-blocking expiration case to resolve: if a student
-> checks out a machine but never logs in, the current local cleanup script sees
-> no mounted guest home and exits. Continued heartbeats prevent the server
-> sweep from handling that machine, so the rotated guest password can remain
-> locally valid after its web credential expires. Keep machines in a controlled
-> pilot until a no-login expiry path locks `guest` and its physical-machine test
-> passes.
 
 ## How it fits together
 
@@ -167,7 +159,7 @@ GOOGLE_CLIENT_SECRET=<GOOGLE_WEB_CLIENT_SECRET>
 ALLOWED_EMAIL_DOMAIN=ubu.ac.th
 DATABASE_URL=file:./data/labgate.db
 PROVISIONER_SSH_KEY_PATH=/run/secrets/provisioner_key
-CREDENTIAL_TTL_HOURS=3
+CREDENTIAL_TTL_HOURS=0.08333333333333333
 MACHINE_REGISTRATION_SECRET=<GENERATED_SECRET_2>
 CRON_SECRET=<GENERATED_SECRET_3>
 ```
@@ -178,8 +170,8 @@ Notes:
   in the Google redirect URI.
 - Keep `DATABASE_URL` and `PROVISIONER_SSH_KEY_PATH` at their shown container
   paths for the supplied Compose deployment.
-- `CREDENTIAL_TTL_HOURS` defaults to three hours. Use the same duration when
-  setting `LABGATE_MAX_TTL_SECONDS` on each lab machine.
+- `CREDENTIAL_TTL_HOURS` defaults to five minutes (5/60 of an hour). Use the
+  matching value `300` for `LABGATE_MAX_TTL_SECONDS` on each lab machine.
 - Never commit `.env.local`, `data/`, or `secrets/`.
 
 ### 6. Start the application
@@ -435,7 +427,7 @@ read -rsp 'Machine registration secret: ' LABGATE_REGISTRATION_SECRET
 export LABGATE_REGISTRATION_SECRET
 export LABGATE_API_URL='http://100.88.10.5:3000'
 export LABGATE_MACHINE_NAME='Lab A - PC 01'
-export LABGATE_MAX_TTL_SECONDS='10800'
+export LABGATE_MAX_TTL_SECONDS='300'
 /tmp/labgate-machine-setup/setup-machine.sh
 unset LABGATE_REGISTRATION_SECRET
 exit
@@ -504,9 +496,9 @@ Complete this test on a non-production machine before rollout:
 9. Test expiration during an open guest session by using a short TTL on a test
    machine. Confirm the local cleanup timer locks the account even if webhooks
    are unavailable.
-10. Test expiration without ever logging in. This test currently exposes the
-    production-blocking issue described at the top of this README; do not
-    deploy until the password is locked automatically in this case.
+10. Test expiration without ever logging in. Confirm the local cleanup timer
+    locks the issued password and the heartbeat returns the machine to the
+    available state.
 11. Simulate a powered-off or disconnected machine and confirm the Pi cron
     sweep eventually revokes the expired credential and releases the machine.
 12. Review the Pi and lab-machine logs for errors.

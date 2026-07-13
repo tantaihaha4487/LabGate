@@ -4,10 +4,9 @@ set -u
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 readonly GUEST_HOME=/home/guest
 readonly MOUNT_TIMESTAMP=/run/labgate/guest-mounted-at
+readonly ISSUED_TIMESTAMP=/var/lib/labgate/credential-issued-at
 readonly MAX_TTL_FILE=/etc/labgate/max-ttl-seconds
-readonly DEFAULT_MAX_TTL_SECONDS=10800
-
-mountpoint --quiet "${GUEST_HOME}" || exit 0
+readonly DEFAULT_MAX_TTL_SECONDS=300
 
 max_ttl=${DEFAULT_MAX_TTL_SECONDS}
 if [[ -r ${MAX_TTL_FILE} ]]; then
@@ -17,21 +16,26 @@ if [[ -r ${MAX_TTL_FILE} ]]; then
   fi
 fi
 
-should_cleanup=1
-if [[ -r ${MOUNT_TIMESTAMP} ]]; then
-  mounted_at=$(<"${MOUNT_TIMESTAMP}")
-  if [[ ${mounted_at} =~ ^[0-9]+$ ]]; then
-    now=$(date +%s)
-    if (( now >= mounted_at && now - mounted_at < max_ttl )); then
-      should_cleanup=0
-    fi
+started_at=
+if [[ -r ${ISSUED_TIMESTAMP} ]]; then
+  started_at=$(<"${ISSUED_TIMESTAMP}")
+elif [[ -r ${MOUNT_TIMESTAMP} ]]; then
+  started_at=$(<"${MOUNT_TIMESTAMP}")
+elif ! mountpoint --quiet "${GUEST_HOME}"; then
+  exit 0
+fi
+
+if [[ ${started_at} =~ ^[0-9]+$ ]]; then
+  now=$(date +%s)
+  if (( now >= started_at && now - started_at < max_ttl )); then
+    exit 0
   fi
 fi
 
-(( should_cleanup == 1 )) || exit 0
-
 failed=0
-umount --lazy "${GUEST_HOME}" || failed=1
+if mountpoint --quiet "${GUEST_HOME}"; then
+  umount --lazy "${GUEST_HOME}" || failed=1
+fi
 passwd -l guest >/dev/null || failed=1
-rm -f "${MOUNT_TIMESTAMP}"
+rm -f "${MOUNT_TIMESTAMP}" "${ISSUED_TIMESTAMP}"
 exit "${failed}"

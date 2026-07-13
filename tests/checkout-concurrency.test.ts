@@ -4,6 +4,46 @@ import test from "node:test";
 import { CheckoutError, checkoutMachine } from "../lib/checkout";
 import { db } from "../lib/db/client";
 
+test("checkout defaults to a five-minute credential lifetime", async () => {
+  const previousTtl = process.env.CREDENTIAL_TTL_HOURS;
+  const suffix = randomUUID();
+  const now = new Date("2026-07-13T12:00:00.000Z");
+  const machine = await db.machine.create({
+    data: {
+      name: `Default TTL ${suffix}`,
+      tailscaleIp: "100.64.0.248",
+      webhookToken: `test-${suffix}`,
+      status: "available",
+      lastHeartbeat: now,
+    },
+  });
+
+  delete process.env.CREDENTIAL_TTL_HOURS;
+
+  try {
+    const credential = await checkoutMachine({
+      machineId: machine.id,
+      studentEmail: `ttl-${suffix}@ubu.ac.th`,
+      provision: async () => undefined,
+      now,
+    });
+
+    assert.equal(
+      new Date(credential.expiresAt).getTime(),
+      now.getTime() + 5 * 60 * 1000,
+    );
+  } finally {
+    if (previousTtl === undefined) {
+      delete process.env.CREDENTIAL_TTL_HOURS;
+    } else {
+      process.env.CREDENTIAL_TTL_HOURS = previousTtl;
+    }
+    await db.auditLog.deleteMany({ where: { machineId: machine.id } });
+    await db.guestCredential.deleteMany({ where: { machineId: machine.id } });
+    await db.machine.delete({ where: { id: machine.id } });
+  }
+});
+
 test("concurrent checkout claims produce one credential and one conflict", async () => {
   const suffix = randomUUID();
   const studentEmail = `concurrency-${suffix}@ubu.ac.th`;

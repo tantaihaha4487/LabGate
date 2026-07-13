@@ -24,6 +24,8 @@ are checked.
   generated Next.js guidance; that guidance is retained at the end of the file.
 - Added `MACHINE_REGISTRATION_SECRET` so one-time machine enrollment is not a
   publicly callable token-minting endpoint.
+- Changed the default credential lifetime to five minutes and made the local
+  cleanup backstop lock issued credentials even when no PAM session was opened.
 
 ## Blockers
 

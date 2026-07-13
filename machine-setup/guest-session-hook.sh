@@ -5,6 +5,7 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 readonly GUEST_HOME=/home/guest
 readonly STATE_DIRECTORY=/run/labgate
 readonly MOUNT_TIMESTAMP=${STATE_DIRECTORY}/guest-mounted-at
+readonly ISSUED_TIMESTAMP=/var/lib/labgate/credential-issued-at
 readonly CONFIG_DIRECTORY=/etc/labgate
 
 post_webhook() {
@@ -50,7 +51,7 @@ case "${PAM_TYPE:-}" in
       umount --lazy "${GUEST_HOME}" || failed=1
     fi
     passwd -l guest >/dev/null || failed=1
-    rm -f "${MOUNT_TIMESTAMP}"
+    rm -f "${MOUNT_TIMESTAMP}" "${ISSUED_TIMESTAMP}"
     post_webhook session-close
     exit "${failed}"
     ;;

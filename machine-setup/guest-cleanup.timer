@@ -2,9 +2,9 @@
 Description=Check for abandoned LabGate guest sessions
 
 [Timer]
-OnBootSec=3min
-OnUnitActiveSec=3min
-AccuracySec=15s
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=10s
 Persistent=true
 Unit=guest-cleanup.service
 

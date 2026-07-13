@@ -37,7 +37,9 @@ export class CheckoutError extends Error {
 }
 
 function credentialTtlMilliseconds(): number {
-  const hours = Number(process.env.CREDENTIAL_TTL_HOURS ?? "3");
+  const hours = Number(
+    process.env.CREDENTIAL_TTL_HOURS ?? "0.08333333333333333",
+  );
 
   if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
     throw new Error("CREDENTIAL_TTL_HOURS must be between 0 and 24.");
