@@ -311,11 +311,14 @@ Run these commands from the LabGate repository on the Pi:
 
 ```sh
 cd /path/to/LabGate
-scp secrets/provisioner_key.pub \
-  labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
-scp -r machine-setup \
-  labadmin@100.93.42.17:/tmp/labgate-machine-setup
+scp secrets/provisioner_key.pub labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
+scp -r machine-setup labadmin@100.93.42.17:/tmp/labgate-machine-setup
 ```
+
+Each `scp` command above is one line. If you split a shell command with `\`,
+the backslash must be the final character on that line with no spaces after it;
+otherwise `scp` may report `stat local " ": No such file or directory` even
+after the intended file was copied.
 
 #### Option B: Copy from another Linux or macOS computer
 
@@ -327,12 +330,9 @@ repository path:
 ```sh
 git clone https://github.com/tantaihaha4487/LabGate.git
 cd LabGate
-scp piadmin@100.88.10.5:/path/to/LabGate/secrets/provisioner_key.pub \
-  /tmp/labgate-provisioner.pub
-scp /tmp/labgate-provisioner.pub \
-  labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
-scp -r machine-setup \
-  labadmin@100.93.42.17:/tmp/labgate-machine-setup
+scp piadmin@100.88.10.5:/path/to/LabGate/secrets/provisioner_key.pub /tmp/labgate-provisioner.pub
+scp /tmp/labgate-provisioner.pub labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
+scp -r machine-setup labadmin@100.93.42.17:/tmp/labgate-machine-setup
 ```
 
 Delete the temporary public-key copy when finished:
