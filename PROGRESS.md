@@ -9,7 +9,7 @@ are checked.
 - [x] Phase 0 — Scaffold
 - [x] Phase 1 — Database
 - [x] Phase 2 — Auth
-- [ ] Phase 3 — Machine list + checkout API
+- [x] Phase 3 — Machine list + checkout API
 - [ ] Phase 4 — Provisioning module
 - [ ] Phase 5 — Machine-side scripts
 - [ ] Phase 6 — Webhooks + heartbeat
