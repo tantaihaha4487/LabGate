@@ -418,17 +418,45 @@ sudo systemctl reload ssh
 
 ### 4. Run the machine installer
 
-On the lab machine, become root. Read the registration secret without placing
-it in shell history, configure the installer, and run it:
+On the lab machine, start an explicit root Bash shell. Do this as a separate
+step and wait for the root prompt before continuing:
 
 ```sh
-sudo -i
+sudo bash
+```
+
+Using `sudo -i` is not recommended here because it may start Zsh or another
+root login shell where Bash's `read -p` option has different behavior.
+
+At the root Bash prompt, run the following command without putting the secret
+inside it:
+
+```sh
 read -rsp 'Machine registration secret: ' LABGATE_REGISTRATION_SECRET
+```
+
+When `Machine registration secret:` appears, paste the secret and press Enter.
+The pasted value is intentionally invisible. Then configure and run the
+installer:
+
+```sh
+printf '\n'
 export LABGATE_REGISTRATION_SECRET
 export LABGATE_API_URL='http://100.88.10.5:3000'
 export LABGATE_MACHINE_NAME='Lab A - PC 01'
 export LABGATE_MAX_TTL_SECONDS='300'
-/tmp/labgate-machine-setup/setup-machine.sh
+bash /tmp/labgate-machine-setup/setup-machine.sh
+```
+
+A successful run ends with:
+
+```text
+LabGate machine setup complete for Lab A - PC 01 (100.93.42.17).
+```
+
+Clear the registration secret and leave the root Bash shell:
+
+```sh
 unset LABGATE_REGISTRATION_SECRET
 exit
 ```
