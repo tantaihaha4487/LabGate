@@ -1,0 +1,13 @@
+services:
+  labgate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./secrets/provisioner_key:/run/secrets/provisioner_key:ro

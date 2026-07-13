@@ -6,7 +6,7 @@ after a break — or you're a different agent picking this up — read this file
 first. Don't redo a checked phase. Don't start a phase before the ones above it
 are checked.
 
-- [ ] Phase 0 — Scaffold
+- [x] Phase 0 — Scaffold
 - [ ] Phase 1 — Database
 - [ ] Phase 2 — Auth
 - [ ] Phase 3 — Machine list + checkout API
@@ -17,5 +17,8 @@ are checked.
 - [ ] Phase 8 — End-to-end pass
 
 ## Notes / deviations
+
+- Package manager changed from Bun to npm at the user's request; `AGENTS.md` and
+  `BUILD_PROMPT.md` were updated to keep the project contract consistent.
 
 ## Blockers
