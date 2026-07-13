@@ -26,3 +26,9 @@ are checked.
   publicly callable token-minting endpoint.
 
 ## Blockers
+
+- Phase 8 requires real Google OAuth credentials and an Ubuntu Desktop lab
+  machine or VM with a display-manager login screen. This environment verified
+  the production container, SSH password rotation, PAM tmpfs remount, local
+  cleanup backstop, and server sweep, but cannot perform the physical login and
+  mid-desktop-session kill checks.

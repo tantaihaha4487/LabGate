@@ -63,3 +63,46 @@ test("one authenticated sweep releases an expired credential on an unreachable m
     await db.machine.delete({ where: { id: machine.id } });
   }
 });
+
+test("the sweep leaves an expired credential alone while its machine is reporting activity", async () => {
+  const suffix = randomUUID();
+  const machine = await db.machine.create({
+    data: {
+      name: `Recent activity ${suffix}`,
+      tailscaleIp: "100.64.0.249",
+      webhookToken: randomBytes(32).toString("base64url"),
+      status: "occupied",
+      lastHeartbeat: new Date(),
+    },
+  });
+  const credential = await db.guestCredential.create({
+    data: {
+      machineId: machine.id,
+      studentEmail: `recent-${suffix}@ubu.ac.th`,
+      expiresAt: new Date(Date.now() - 60_000),
+    },
+  });
+
+  try {
+    const response = await POST(
+      new Request("http://localhost/api/cron/sweep", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
+      }),
+    );
+    assert.equal(response.status, 200);
+
+    const unchangedMachine = await db.machine.findUniqueOrThrow({
+      where: { id: machine.id },
+    });
+    const unchangedCredential = await db.guestCredential.findUniqueOrThrow({
+      where: { id: credential.id },
+    });
+    assert.equal(unchangedMachine.status, "occupied");
+    assert.equal(unchangedCredential.revokedAt, null);
+  } finally {
+    await db.auditLog.deleteMany({ where: { machineId: machine.id } });
+    await db.guestCredential.deleteMany({ where: { machineId: machine.id } });
+    await db.machine.delete({ where: { id: machine.id } });
+  }
+});
