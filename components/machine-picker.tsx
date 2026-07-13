@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type MachineStatus = "available" | "occupied" | "offline";
 
@@ -30,21 +30,35 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
   const [error, setError] = useState<string>();
   const [credential, setCredential] = useState<IssuedCredential>();
 
-  const loadMachines = useCallback(async () => {
-    setError(undefined);
-    setLoading(true);
+  const loadMachines = useCallback(async (background = false) => {
+    if (!background) {
+      setError(undefined);
+      setLoading(true);
+    }
     const response = await fetch("/api/machines", { cache: "no-store" });
 
     if (!response.ok) {
       setError("Could not load lab machines.");
-      setLoading(false);
+      if (!background) {
+        setLoading(false);
+      }
       return;
     }
 
     const data = (await response.json()) as { machines: Machine[] };
     setMachines(data.machines);
-    setLoading(false);
+    if (!background) {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    const refreshInterval = window.setInterval(() => {
+      void loadMachines(true);
+    }, 15_000);
+
+    return () => window.clearInterval(refreshInterval);
+  }, [loadMachines]);
 
   async function checkout(machineId: string) {
     setPendingId(machineId);

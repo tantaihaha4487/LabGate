@@ -12,7 +12,7 @@ are checked.
 - [x] Phase 3 — Machine list + checkout API
 - [x] Phase 4 — Provisioning module
 - [x] Phase 5 — Machine-side scripts
-- [ ] Phase 6 — Webhooks + heartbeat
+- [x] Phase 6 — Webhooks + heartbeat
 - [ ] Phase 7 — Backstop sweep (server side)
 - [ ] Phase 8 — End-to-end pass
 

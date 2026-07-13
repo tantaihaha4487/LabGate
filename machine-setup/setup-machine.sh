@@ -65,12 +65,18 @@ install -o root -g root -m 0700 \
   "${SCRIPT_DIRECTORY}/guest-session-hook.sh" /usr/local/sbin/guest-session-hook.sh
 install -o root -g root -m 0700 \
   "${SCRIPT_DIRECTORY}/guest-cleanup.sh" /usr/local/sbin/guest-cleanup.sh
+install -o root -g root -m 0700 \
+  "${SCRIPT_DIRECTORY}/guest-heartbeat.sh" /usr/local/sbin/guest-heartbeat.sh
 install -o root -g root -m 0440 \
   "${SCRIPT_DIRECTORY}/sudoers-guest-provision" /etc/sudoers.d/labgate-guest-provision
 install -o root -g root -m 0644 \
   "${SCRIPT_DIRECTORY}/guest-cleanup.service" /etc/systemd/system/guest-cleanup.service
 install -o root -g root -m 0644 \
   "${SCRIPT_DIRECTORY}/guest-cleanup.timer" /etc/systemd/system/guest-cleanup.timer
+install -o root -g root -m 0644 \
+  "${SCRIPT_DIRECTORY}/guest-heartbeat.service" /etc/systemd/system/guest-heartbeat.service
+install -o root -g root -m 0644 \
+  "${SCRIPT_DIRECTORY}/guest-heartbeat.timer" /etc/systemd/system/guest-heartbeat.timer
 
 pam_file=$(select_pam_file)
 [[ -f ${pam_file} ]] || die "PAM file does not exist: ${pam_file}"
@@ -112,5 +118,6 @@ fi
 
 systemctl daemon-reload
 systemctl enable --now guest-cleanup.timer
+systemctl enable --now guest-heartbeat.timer
 
 printf 'LabGate machine setup complete for %s (%s).\n' "${machine_name}" "${tailscale_ip}"
