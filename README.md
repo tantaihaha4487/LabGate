@@ -57,16 +57,17 @@ You need:
   or SDDM), `systemd`, PAM, OpenSSH Server, `curl`, `sudo`, and Tailscale.
 - Administrator access to the Pi and every lab machine.
 
-The examples below use these placeholders:
+The commands below use one consistent worked example:
 
 | Placeholder | Example | Meaning |
 |---|---|---|
 | `APP_URL` | `https://labgate.example.ubu.ac.th` | Student-facing HTTPS URL |
-| `PI_TS_IP` | `100.64.0.5` | Pi's Tailscale IPv4 address |
-| `LAB_TS_IP` | `100.64.0.20` | A lab machine's Tailscale IPv4 address |
+| `PI_TS_IP` | `100.88.10.5` | Pi's Tailscale IPv4 address |
+| `LAB_TS_IP` | `100.93.42.17` | A lab machine's Tailscale IPv4 address |
 | `ADMIN_USER` | `labadmin` | Existing local administrator on a lab machine |
 
-Do not copy example IPs or secrets literally.
+Replace these example values with the addresses and usernames from your own
+tailnet. Do not copy example IPs or secrets literally.
 
 ## Production setup on the Raspberry Pi
 
@@ -278,20 +279,15 @@ sudo systemctl enable --now ssh
 ```
 
 Install Tailscale using its official instructions, join the same tailnet as the
-Pi, and verify both directions:
+Pi, and verify both directions. This worked example consistently uses
+`100.88.10.5` for the Pi and `100.93.42.17` for the Ubuntu lab machine.
 
 ```sh
 tailscale ip -4
-tailscale ping PI_TS_IP
+tailscale ping 100.88.10.5
 ```
 
 On the Pi, verify the lab machine is reachable:
-
-```sh
-tailscale ping LAB_TS_IP
-```
-
-For example, if the lab machine's Tailscale address is `100.93.42.17`:
 
 ```sh
 tailscale ping 100.93.42.17
@@ -300,21 +296,86 @@ tailscale ping 100.93.42.17
 The remaining examples assume the machine has an existing administrator named
 `labadmin`. Replace that username with the real local administrator account.
 
-### 2. Create the provisioning service identity
+### 2. Copy the setup files to the lab machine
 
-The installer intentionally requires an existing `provisioner` account. This
-account is infrastructure, not a student or guest account.
+The lab machine needs the complete `machine-setup/` directory and the
+provisioning **public** key. Choose one of the following methods based on the
+computer from which you are working.
 
-From the LabGate repository on the Pi, copy only the provisioning **public**
-key to the administrator account on the destination machine:
+Never copy `secrets/provisioner_key` (the private key) away from the Pi. Only
+copy `secrets/provisioner_key.pub`.
+
+#### Option A: Copy directly from the Raspberry Pi
+
+Run these commands from the LabGate repository on the Pi:
 
 ```sh
 cd /path/to/LabGate
 scp secrets/provisioner_key.pub \
   labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
+scp -r machine-setup \
+  labadmin@100.93.42.17:/tmp/labgate-machine-setup
 ```
 
-Never copy `secrets/provisioner_key` (the private key) to a lab machine.
+#### Option B: Copy from another Linux or macOS computer
+
+Install Git and the OpenSSH client on the operator computer. Clone the public
+repository, fetch the public key from the Pi, and forward both items to the lab
+machine. Replace `piadmin` and `/path/to/LabGate` with the actual Pi account and
+repository path:
+
+```sh
+git clone https://github.com/tantaihaha4487/LabGate.git
+cd LabGate
+scp piadmin@100.88.10.5:/path/to/LabGate/secrets/provisioner_key.pub \
+  /tmp/labgate-provisioner.pub
+scp /tmp/labgate-provisioner.pub \
+  labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
+scp -r machine-setup \
+  labadmin@100.93.42.17:/tmp/labgate-machine-setup
+```
+
+Delete the temporary public-key copy when finished:
+
+```sh
+rm -f /tmp/labgate-provisioner.pub
+```
+
+#### Option C: Copy from Windows PowerShell
+
+Windows is supported as the operator computer used to copy files. Install Git
+and the Windows OpenSSH Client first, then open PowerShell:
+
+```powershell
+git clone https://github.com/tantaihaha4487/LabGate.git
+Set-Location LabGate
+scp.exe piadmin@100.88.10.5:/path/to/LabGate/secrets/provisioner_key.pub .\labgate-provisioner.pub
+scp.exe .\labgate-provisioner.pub labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
+scp.exe -r .\machine-setup labadmin@100.93.42.17:/tmp/labgate-machine-setup
+Remove-Item .\labgate-provisioner.pub
+```
+
+The destination lab machine itself must be Ubuntu Desktop. A Windows machine
+cannot be enrolled as a LabGate endpoint because the machine-side security
+model requires PAM, `systemd`, tmpfs, `passwd`, and Linux sudoers. Windows may
+only be used as the administrator/operator computer in this workflow.
+
+Confirm that all files arrived, from any operator computer with SSH:
+
+```sh
+ssh labadmin@100.93.42.17 \
+  'find /tmp/labgate-machine-setup -maxdepth 1 -type f -print'
+```
+
+Expected files include `setup-machine.sh`, `guest-account.sh`, the PAM session
+hook, cleanup and heartbeat scripts, systemd units, and the sudoers file. Copy
+the whole directory; `setup-machine.sh` reads those neighboring files during
+installation.
+
+### 3. Create the provisioning service identity
+
+The installer intentionally requires an existing `provisioner` account. This
+account is infrastructure, not a student or guest account.
 
 Connect to the destination machine:
 
@@ -322,8 +383,8 @@ Connect to the destination machine:
 ssh labadmin@100.93.42.17
 ```
 
-On the lab machine, create the service account if you have not already done so,
-then install the copied public key:
+On the lab machine, create the service account and install the copied public
+key:
 
 ```sh
 sudo tee /etc/sysusers.d/labgate-provisioner.conf >/dev/null <<'EOF'
@@ -346,38 +407,16 @@ sudo sshd -t
 sudo systemctl reload ssh
 ```
 
-### 3. Copy and run the machine installer
+### 4. Run the machine installer
 
-From the repository root on the Pi, copy the complete `machine-setup/`
-directory to the destination lab machine:
-
-```sh
-cd /path/to/LabGate
-scp -r machine-setup \
-  labadmin@100.93.42.17:/tmp/labgate-machine-setup
-```
-
-Confirm all installer files arrived:
+On the lab machine, become root. Read the registration secret without placing
+it in shell history, configure the installer, and run it:
 
 ```sh
-ssh labadmin@100.93.42.17 \
-  'find /tmp/labgate-machine-setup -maxdepth 1 -type f -print'
-```
-
-Expected files include `setup-machine.sh`, `guest-account.sh`, the PAM session
-hook, cleanup and heartbeat scripts, systemd units, and the sudoers file. Copy
-the whole directory; `setup-machine.sh` reads those neighboring files during
-installation.
-
-SSH to the lab machine, become root, read the registration secret without
-placing it in shell history, configure the installer, and run it:
-
-```sh
-ssh labadmin@100.93.42.17
 sudo -i
 read -rsp 'Machine registration secret: ' LABGATE_REGISTRATION_SECRET
 export LABGATE_REGISTRATION_SECRET
-export LABGATE_API_URL='http://PI_TS_IP:3000'
+export LABGATE_API_URL='http://100.88.10.5:3000'
 export LABGATE_MACHINE_NAME='Lab A - PC 01'
 export LABGATE_MAX_TTL_SECONDS='10800'
 /tmp/labgate-machine-setup/setup-machine.sh
@@ -385,9 +424,8 @@ unset LABGATE_REGISTRATION_SECRET
 exit
 ```
 
-In this example, `100.93.42.17` is the destination lab machine. Replace
-`PI_TS_IP` in `LABGATE_API_URL` with the Raspberry Pi's Tailscale IP; do not use
-`100.93.42.17` there unless that address actually belongs to the Pi.
+In this worked example, `100.88.10.5` is always the Pi and
+`100.93.42.17` is always the destination Ubuntu lab machine.
 
 `LABGATE_API_URL` should use the Pi's Tailscale address or tailnet-only DNS
 name—not the public student URL. If the machine has not joined Tailscale yet,
@@ -407,7 +445,7 @@ The installer is idempotent. Rerunning it updates scripts, sudoers, PAM, and
 systemd units without creating another guest account. It preserves the existing
 per-machine webhook token.
 
-### 4. Verify the machine installation
+### 5. Verify the machine installation
 
 On the lab machine:
 
@@ -426,7 +464,7 @@ On the Pi, test the exact SSH path used by the app:
 ```sh
 ssh -i secrets/provisioner_key \
   -o IdentitiesOnly=yes \
-  provisioner@LAB_TS_IP \
+  provisioner@100.93.42.17 \
   'sudo /usr/local/sbin/guest-account.sh revoke'
 ```
 
@@ -575,7 +613,7 @@ Google's hosted-domain setting.
 
 Verify, in order:
 
-1. `tailscale ping LAB_TS_IP` works from the Pi.
+1. `tailscale ping 100.93.42.17` works from the Pi.
 2. TCP port 22 is allowed from the Pi to the machine.
 3. The private key is mounted at `/run/secrets/provisioner_key` in the container.
 4. The `provisioner` account owns its `authorized_keys` file.
@@ -587,7 +625,7 @@ Then inspect `docker compose logs labgate` and the machine's SSH journal.
 ### The machine does not appear after setup
 
 Check the heartbeat timer and confirm the machine can reach
-`http://PI_TS_IP:3000`. If the Pi database was replaced but the machine still
+`http://100.88.10.5:3000`. If the Pi database was replaced but the machine still
 has `/etc/labgate/webhook-token`, the token no longer matches a database row.
 Deliberate re-enrollment requires removing that file, rerunning the installer
 with `LABGATE_REGISTRATION_SECRET`, and protecting the newly issued token.
