@@ -394,15 +394,25 @@ On the lab machine, create the service account and install the copied public
 key:
 
 ```sh
+sudo test -s /tmp/labgate-provisioner.pub
+sudo install -d -o root -g root -m 0755 /etc/sysusers.d
 sudo tee /etc/sysusers.d/labgate-provisioner.conf >/dev/null <<'EOF'
 u provisioner - "LabGate SSH provisioner" /var/lib/labgate-provisioner /bin/bash
 EOF
 sudo systemd-sysusers /etc/sysusers.d/labgate-provisioner.conf
+getent passwd provisioner
 sudo install -d -o provisioner -g provisioner -m 0700 \
   /var/lib/labgate-provisioner/.ssh
 sudo install -o provisioner -g provisioner -m 0600 \
   /tmp/labgate-provisioner.pub \
   /var/lib/labgate-provisioner/.ssh/authorized_keys
+sudo test -s /var/lib/labgate-provisioner/.ssh/authorized_keys
+```
+
+Stop at the first reported error. Delete the temporary public key only after
+all commands above succeed:
+
+```sh
 sudo rm -f /tmp/labgate-provisioner.pub
 ```
 
