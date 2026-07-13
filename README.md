@@ -310,7 +310,7 @@ copy `secrets/provisioner_key.pub`.
 Run these commands from the LabGate repository on the Pi:
 
 ```sh
-cd /path/to/LabGate
+cd ~/LabGate
 scp secrets/provisioner_key.pub labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
 scp -r machine-setup labadmin@100.93.42.17:/tmp/labgate-machine-setup
 ```
@@ -330,13 +330,14 @@ account that exists there.
 
 Install Git and the OpenSSH client on the operator computer. Clone the public
 repository, fetch the public key from the Pi, and forward both items to the lab
-machine. Replace `piadmin` and `/path/to/LabGate` with the actual Pi account and
-repository path. Use this relay only when the current computer is not the Pi:
+machine. This example assumes the Pi user is `piadmin` and the repository was
+cloned as `/home/piadmin/LabGate`. Replace both when your Pi username or clone
+location differs. Use this relay only when the current computer is not the Pi:
 
 ```sh
 git clone https://github.com/tantaihaha4487/LabGate.git
 cd LabGate
-scp piadmin@100.88.10.5:/path/to/LabGate/secrets/provisioner_key.pub /tmp/labgate-provisioner.pub
+scp piadmin@100.88.10.5:/home/piadmin/LabGate/secrets/provisioner_key.pub /tmp/labgate-provisioner.pub
 scp /tmp/labgate-provisioner.pub labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
 scp -r machine-setup labadmin@100.93.42.17:/tmp/labgate-machine-setup
 ```
@@ -355,7 +356,7 @@ and the Windows OpenSSH Client first, then open PowerShell:
 ```powershell
 git clone https://github.com/tantaihaha4487/LabGate.git
 Set-Location LabGate
-scp.exe piadmin@100.88.10.5:/path/to/LabGate/secrets/provisioner_key.pub .\labgate-provisioner.pub
+scp.exe piadmin@100.88.10.5:/home/piadmin/LabGate/secrets/provisioner_key.pub .\labgate-provisioner.pub
 scp.exe .\labgate-provisioner.pub labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
 scp.exe -r .\machine-setup labadmin@100.93.42.17:/tmp/labgate-machine-setup
 Remove-Item .\labgate-provisioner.pub
