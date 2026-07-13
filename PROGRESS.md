@@ -7,7 +7,7 @@ first. Don't redo a checked phase. Don't start a phase before the ones above it
 are checked.
 
 - [x] Phase 0 — Scaffold
-- [ ] Phase 1 — Database
+- [x] Phase 1 — Database
 - [ ] Phase 2 — Auth
 - [ ] Phase 3 — Machine list + checkout API
 - [ ] Phase 4 — Provisioning module

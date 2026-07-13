@@ -1,0 +1,62 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum MachineStatus {
+  available
+  occupied
+  offline
+}
+
+enum AuditEvent {
+  login
+  checkout
+  provision_ok
+  provision_fail
+  session_open
+  session_close
+  force_revoke
+  heartbeat_timeout
+}
+
+model Machine {
+  id               String            @id @default(cuid())
+  name             String
+  tailscaleIp      String            @map("tailscale_ip")
+  webhookToken     String            @unique @map("webhook_token")
+  status           MachineStatus     @default(available)
+  lastHeartbeat    DateTime?         @map("last_heartbeat")
+  guestCredentials GuestCredential[]
+  auditLogs        AuditLog[]
+
+  @@map("machines")
+}
+
+model GuestCredential {
+  id           String    @id @default(cuid())
+  machineId    String    @map("machine_id")
+  studentEmail String    @map("student_email")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  machine      Machine   @relation(fields: [machineId], references: [id])
+
+  @@map("guest_credentials")
+}
+
+model AuditLog {
+  id           String     @id @default(cuid())
+  machineId    String?    @map("machine_id")
+  studentEmail String?    @map("student_email")
+  event        AuditEvent
+  detail       String?
+  createdAt    DateTime   @default(now()) @map("created_at")
+  machine      Machine?   @relation(fields: [machineId], references: [id])
+
+  @@map("audit_log")
+}
