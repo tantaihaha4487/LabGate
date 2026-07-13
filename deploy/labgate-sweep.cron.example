@@ -1,0 +1,2 @@
+# Install in the Raspberry Pi host's crontab after replacing the secret.
+* * * * * curl --fail --silent --show-error --max-time 20 --request POST --header "Authorization: Bearer REPLACE_WITH_CRON_SECRET" http://127.0.0.1:3000/api/cron/sweep >/dev/null

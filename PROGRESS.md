@@ -13,7 +13,7 @@ are checked.
 - [x] Phase 4 — Provisioning module
 - [x] Phase 5 — Machine-side scripts
 - [x] Phase 6 — Webhooks + heartbeat
-- [ ] Phase 7 — Backstop sweep (server side)
+- [x] Phase 7 — Backstop sweep (server side)
 - [ ] Phase 8 — End-to-end pass
 
 ## Notes / deviations

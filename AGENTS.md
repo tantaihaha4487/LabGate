@@ -75,6 +75,7 @@ DATABASE_URL=file:./data/labgate.db
 PROVISIONER_SSH_KEY_PATH=/run/secrets/provisioner_key
 CREDENTIAL_TTL_HOURS=3
 MACHINE_REGISTRATION_SECRET=
+CRON_SECRET=
 ```
 
 Per-machine webhook tokens are **not** env vars — each machine gets its own random

@@ -1,22 +1,13 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
+import { hasValidBearerToken } from "@/lib/secure-bearer";
 
 export const runtime = "nodejs";
 
 interface RegistrationBody {
   name?: unknown;
   tailscaleIp?: unknown;
-}
-
-function secretsMatch(provided: string, expected: string): boolean {
-  const providedBytes = Buffer.from(provided);
-  const expectedBytes = Buffer.from(expected);
-
-  return (
-    providedBytes.length === expectedBytes.length &&
-    timingSafeEqual(providedBytes, expectedBytes)
-  );
 }
 
 function isTailscaleIpv4(value: string): boolean {
@@ -43,12 +34,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const authorization = request.headers.get("authorization");
-  const providedSecret = authorization?.startsWith("Bearer ")
-    ? authorization.slice("Bearer ".length)
-    : "";
-
-  if (!providedSecret || !secretsMatch(providedSecret, expectedSecret)) {
+  if (!hasValidBearerToken(request.headers, expectedSecret)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
