@@ -159,7 +159,7 @@ GOOGLE_CLIENT_SECRET=<GOOGLE_WEB_CLIENT_SECRET>
 ALLOWED_EMAIL_DOMAIN=ubu.ac.th
 DATABASE_URL=file:./data/labgate.db
 PROVISIONER_SSH_KEY_PATH=/run/secrets/provisioner_key
-CREDENTIAL_TTL_HOURS=0.08333333333333333
+CREDENTIAL_TTL_HOURS=0.05
 GUEST_PASSWORD_LENGTH=8
 MACHINE_REGISTRATION_SECRET=<GENERATED_SECRET_2>
 CRON_SECRET=<GENERATED_SECRET_3>
@@ -171,8 +171,8 @@ Notes:
   in the Google redirect URI.
 - Keep `DATABASE_URL` and `PROVISIONER_SSH_KEY_PATH` at their shown container
   paths for the supplied Compose deployment.
-- `CREDENTIAL_TTL_HOURS` defaults to five minutes (5/60 of an hour). Use the
-  matching value `300` for `LABGATE_MAX_TTL_SECONDS` on each lab machine.
+- `CREDENTIAL_TTL_HOURS` defaults to three minutes (`0.05` hours). Use the
+  matching value `180` for `LABGATE_MAX_TTL_SECONDS` on each lab machine.
 - `GUEST_PASSWORD_LENGTH` defaults to `8`; administrators may set a whole-number
   length from 8 through 128. The generated value always uses the shell-safe,
   unambiguous character set from `AGENTS.md`.
@@ -450,7 +450,7 @@ printf '\n'
 export LABGATE_REGISTRATION_SECRET
 export LABGATE_API_URL='http://100.88.10.5:3000'
 export LABGATE_MACHINE_NAME='Lab A - PC 01'
-export LABGATE_MAX_TTL_SECONDS='300'
+export LABGATE_MAX_TTL_SECONDS='180'
 bash /tmp/labgate-machine-setup/setup-machine.sh
 ```
 

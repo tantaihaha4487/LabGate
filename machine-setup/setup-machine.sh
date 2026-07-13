@@ -41,7 +41,7 @@ done
 
 api_url=${LABGATE_API_URL:-}
 machine_name=${LABGATE_MACHINE_NAME:-$(hostname -s)}
-max_ttl_seconds=${LABGATE_MAX_TTL_SECONDS:-300}
+max_ttl_seconds=${LABGATE_MAX_TTL_SECONDS:-180}
 
 [[ ${api_url} =~ ^https?://[^[:space:]]+$ ]] || die "LABGATE_API_URL must be an HTTP(S) URL"
 api_url=${api_url%/}

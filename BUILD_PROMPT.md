@@ -128,7 +128,7 @@ These are bash/systemd/PAM, not Next.js — write them as plain files, no build 
   `pam_exec.so /usr/local/sbin/guest-session-hook.sh` to the target display manager's
   session stack — do **not** use the `seteuid` option, the hook needs root
 - `guest-cleanup.sh` + `.service` + `.timer`: every ~1 minute, lock an issued
-  credential past its five-minute max-TTL even if no PAM session was opened; if
+  credential past its three-minute max-TTL even if no PAM session was opened; if
   `/home/guest` is mounted, force-unmount it too (invariant 13, this is the
   backstop, keep it independent of the webhook path)
 - `setup-machine.sh`: idempotent top-to-bottom installer — creates+locks `guest` if

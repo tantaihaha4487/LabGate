@@ -4,7 +4,7 @@ import test from "node:test";
 import { CheckoutError, checkoutMachine } from "../lib/checkout";
 import { db } from "../lib/db/client";
 
-test("checkout defaults to a five-minute credential lifetime", async () => {
+test("checkout defaults to a three-minute credential lifetime", async () => {
   const previousTtl = process.env.CREDENTIAL_TTL_HOURS;
   const suffix = randomUUID();
   const now = new Date("2026-07-13T12:00:00.000Z");
@@ -30,7 +30,7 @@ test("checkout defaults to a five-minute credential lifetime", async () => {
 
     assert.equal(
       new Date(credential.expiresAt).getTime(),
-      now.getTime() + 5 * 60 * 1000,
+      now.getTime() + 3 * 60 * 1000,
     );
   } finally {
     if (previousTtl === undefined) {

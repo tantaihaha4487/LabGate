@@ -7,7 +7,7 @@ readonly MOUNT_TIMESTAMP=/run/labgate/guest-mounted-at
 readonly ISSUED_TIMESTAMP=/var/lib/labgate/credential-issued-at
 readonly MAX_TTL_FILE=/etc/labgate/max-ttl-seconds
 readonly CONFIG_DIRECTORY=/etc/labgate
-readonly DEFAULT_MAX_TTL_SECONDS=300
+readonly DEFAULT_MAX_TTL_SECONDS=180
 
 post_expiration_webhook() {
   local api_url token
