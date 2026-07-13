@@ -1,0 +1,7 @@
+[Unit]
+Description=Expire an abandoned LabGate guest session
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/guest-cleanup.sh

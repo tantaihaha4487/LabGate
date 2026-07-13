@@ -11,7 +11,7 @@ are checked.
 - [x] Phase 2 — Auth
 - [x] Phase 3 — Machine list + checkout API
 - [x] Phase 4 — Provisioning module
-- [ ] Phase 5 — Machine-side scripts
+- [x] Phase 5 — Machine-side scripts
 - [ ] Phase 6 — Webhooks + heartbeat
 - [ ] Phase 7 — Backstop sweep (server side)
 - [ ] Phase 8 — End-to-end pass
@@ -20,5 +20,9 @@ are checked.
 
 - Package manager changed from Bun to npm at the user's request; `AGENTS.md` and
   `BUILD_PROMPT.md` were updated to keep the project contract consistent.
+- Restored the full `AGENTS.md` contract after `create-next-app` replaced it with
+  generated Next.js guidance; that guidance is retained at the end of the file.
+- Added `MACHINE_REGISTRATION_SECRET` so one-time machine enrollment is not a
+  publicly callable token-minting endpoint.
 
 ## Blockers
