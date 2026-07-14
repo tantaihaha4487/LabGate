@@ -108,7 +108,7 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   (`LastSeen=2026-07-13T19:49:12.1Z`) and SSH times out, so its current HEAD and
   deployment state cannot yet be re-confirmed.
 - 2026-07-14 delivery: the reviewed implementation and documentation were
-  committed locally as `a8102fbdde75bedb34ba11b2a450627a7d2e4abb` and pushed to
+  committed locally as `a8102fbc1772e311212bd0afc287f46ce9ef0f00` and pushed to
   `origin/main` before any tracked Pi file was changed. This tracker evidence is
   the only follow-up project-file change and is committed/pushed separately
   before the Pi is allowed to pull.
