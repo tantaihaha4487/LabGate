@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
 import {
+  GET as registrationReadiness,
   PATCH as rekeyMachine,
   POST,
 } from "../app/api/admin/register-machine/route";
@@ -14,6 +15,59 @@ function sshFingerprint(seed: string): string {
     .digest("base64")
     .replace(/=+$/, "")}`;
 }
+
+test("registration readiness authenticates without changing machine state", async () => {
+  const before = await db.machine.count();
+  const unauthorized = await registrationReadiness(
+    new Request("http://localhost/api/admin/register-machine"),
+  );
+  assert.equal(unauthorized.status, 401);
+  assert.equal(unauthorized.headers.get("cache-control"), "no-store");
+
+  const authorized = await registrationReadiness(
+    new Request("http://localhost/api/admin/register-machine", {
+      headers: {
+        Authorization: `Bearer ${process.env.MACHINE_REGISTRATION_SECRET}`,
+      },
+    }),
+  );
+  assert.equal(authorized.status, 200);
+  assert.deepEqual(await authorized.json(), {
+    ok: true,
+    service: "labgate",
+    machineEnrollmentVersion: 1,
+    registrationReady: true,
+  });
+  assert.equal(authorized.headers.get("cache-control"), "no-store");
+  assert.equal(await db.machine.count(), before);
+});
+
+test("registration readiness reports an unconfigured Pi without mutation", async () => {
+  const before = await db.machine.count();
+  const configuredSecret = process.env.MACHINE_REGISTRATION_SECRET;
+  delete process.env.MACHINE_REGISTRATION_SECRET;
+
+  try {
+    const response = await registrationReadiness(
+      new Request("http://localhost/api/admin/register-machine"),
+    );
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      service: "labgate",
+      machineEnrollmentVersion: 1,
+      registrationReady: false,
+    });
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    assert.equal(await db.machine.count(), before);
+  } finally {
+    if (configuredSecret === undefined) {
+      delete process.env.MACHINE_REGISTRATION_SECRET;
+    } else {
+      process.env.MACHINE_REGISTRATION_SECRET = configuredSecret;
+    }
+  }
+});
 
 test("machine registration requires the enrollment secret and returns one token", async () => {
   const name = `registration-${randomUUID()}`;

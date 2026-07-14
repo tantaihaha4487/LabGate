@@ -41,6 +41,7 @@ labgate/
 ├── app/
 │   ├── api/
 │   │   ├── auth/[...all]/route.ts
+│   │   ├── health/route.ts
 │   │   ├── machines/route.ts
 │   │   ├── checkout/route.ts
 │   │   ├── cron/sweep/route.ts
@@ -68,9 +69,11 @@ labgate/
 │   └── migrations/
 └── machine-setup/
     ├── 00-labgate-deny-guest.rules
+    ├── install-machine.sh
     ├── labgate-common.sh
     ├── labgate-deny-guest-account-change.sh
     ├── labgate-guest.conf
+    ├── labgate-provisioner.conf
     ├── labgate-provisioner-dispatch.sh
     ├── setup-machine.sh
     ├── guest-account.sh

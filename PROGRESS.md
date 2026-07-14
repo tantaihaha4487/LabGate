@@ -123,6 +123,14 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   `git diff --check`, shell syntax checks, forbidden account-command checks,
   and `npm run build` passed. `npm audit --omit=dev` reported zero
   vulnerabilities.
+- 2026-07-14 one-shot enrollment gate: the interactive installer and Pi
+  enrollment-protocol v1 readiness check raised the Node suite to 92/92 while
+  all 27 rootless machine protocol tests and the uninstall-script checks still
+  passed. `npm run typecheck`, `npm run lint`, and `npm run build` also passed.
+  Tests prove dry-run redaction, immutable source selection, read-only
+  registration readiness, Pi checks before local identity changes, and
+  provisioner-key publication only after hardened setup. No live Ubuntu
+  Desktop enrollment was performed, so Phase 8 remains unchecked.
 - 2026-07-14 container gate: `labgate:audit-final` built successfully. From a
   blank private bind mount it applied all four migrations, passed database
   postflight, started as UID/GID 1000, created `/app/data` and the database with

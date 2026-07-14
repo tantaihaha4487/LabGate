@@ -209,6 +209,19 @@ Each Ubuntu Desktop endpoint requires:
 - the provisioning public key; and
 - the complete committed `machine-setup/` directory.
 
+The normal enrollment path is the interactive one-shot installer:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tantaihaha4487/LabGate/main/machine-setup/install-machine.sh | sudo bash
+```
+
+It installs the Ubuntu prerequisites, connects Tailscale, verifies both Pi
+database health and the registration secret through non-mutating enrollment
+protocol v1 checks, runs the hardened setup, and publishes the provisioning key
+only after setup succeeds. See the
+[lab-machine enrollment guide](docs/operations/lab-machine-enrollment.md) for the
+prompt transcript, dry-run, exact-commit, and local-checkout modes.
+
 `setup-machine.sh` installs or updates scripts, root-only configuration, PAM and
 Polkit policy, SSH policy, sudoers policy, and systemd units idempotently. It terminates
 old provisioner processes, validates the forced dispatcher and sudoers, and only

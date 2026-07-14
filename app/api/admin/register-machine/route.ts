@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { machineEnrollmentProtocol } from "@/lib/machine-enrollment-protocol";
 import {
   readBoundedJsonObject,
   RequestBodyError,
@@ -65,6 +66,40 @@ function identityConflictResponse() {
         "Machine name, Tailscale address, or SSH host-key pin identifies a different registration.",
     },
     { status: 409 },
+  );
+}
+
+export async function GET(request: Request) {
+  const expectedSecret = process.env.MACHINE_REGISTRATION_SECRET?.trim();
+
+  if (!expectedSecret) {
+    return NextResponse.json(
+      {
+        ok: false,
+        ...machineEnrollmentProtocol,
+        registrationReady: false,
+      },
+      {
+        status: 503,
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
+  }
+
+  if (!hasValidBearerToken(request.headers, expectedSecret)) {
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  return NextResponse.json(
+    {
+      ok: true,
+      ...machineEnrollmentProtocol,
+      registrationReady: true,
+    },
+    { headers: { "Cache-Control": "no-store" } },
   );
 }
 

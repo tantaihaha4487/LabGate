@@ -1,0 +1,808 @@
+#!/usr/bin/env bash
+set -euo pipefail
+set +x
+
+export LC_ALL=C
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+
+readonly REPOSITORY_OWNER=tantaihaha4487
+readonly REPOSITORY_NAME=LabGate
+readonly DEFAULT_REF=main
+readonly EXPECTED_ENROLLMENT_VERSION=1
+readonly EXPECTED_HEALTH_JSON='{"ok":true,"service":"labgate","machineEnrollmentVersion":1}'
+readonly EXPECTED_REGISTRATION_JSON='{"ok":true,"service":"labgate","machineEnrollmentVersion":1,"registrationReady":true}'
+readonly PROVISIONER_HOME=/var/lib/labgate-provisioner
+readonly PROVISIONER_SYSUSERS=/etc/sysusers.d/labgate-provisioner.conf
+readonly CONFIG_DIRECTORY=/etc/labgate
+
+dry_run=0
+local_source=0
+requested_commit=
+runtime_directory=
+source_directory=
+source_revision=
+registration_secret=
+tailscale_auth_key=
+provided_registration_secret=${LABGATE_REGISTRATION_SECRET:-}
+provided_tailscale_auth_key=${TAILSCALE_AUTH_KEY:-}
+unset LABGATE_REGISTRATION_SECRET TAILSCALE_AUTH_KEY MACHINE_REGISTRATION_SECRET 2>/dev/null || true
+
+cleanup() {
+  registration_secret=
+  tailscale_auth_key=
+  provided_registration_secret=
+  provided_tailscale_auth_key=
+  unset LABGATE_REGISTRATION_SECRET TAILSCALE_AUTH_KEY 2>/dev/null || true
+  case "${runtime_directory}" in
+    /tmp/labgate-install.*)
+      [[ ! -d ${runtime_directory} ]] || rm -rf -- "${runtime_directory}"
+      ;;
+  esac
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+die() {
+  printf 'install-machine: %s\n' "$1" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage: install-machine.sh [--dry-run] [--local | --commit SHA]
+
+Interactively installs or updates a physical Ubuntu Desktop LabGate endpoint.
+
+Options:
+  --dry-run       Validate inputs and print the installation preview only.
+  --local         Use the machine-setup directory containing this script.
+  --commit SHA    Download machine-side assets from one exact Git commit.
+  -h, --help      Show this help text.
+
+Fresh enrollment prompts for the Pi API origin, machine name, password length,
+registration secret, optional Tailscale auth key, and the Pi's Ed25519
+provisioner public key. Secrets are read from /dev/tty without echo.
+EOF
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
+}
+
+new_runtime_file() {
+  local destination_name=$1 path
+
+  path=$(mktemp "${runtime_directory}/file.XXXXXX") \
+    || die "could not create a private temporary file"
+  chmod 0600 "${path}"
+  printf -v "${destination_name}" '%s' "${path}"
+}
+
+prompt_value() {
+  local destination_name=$1 label=$2 default_value=${3:-} value
+
+  [[ ${LABGATE_INSTALL_NONINTERACTIVE:-0} != 1 ]] \
+    || die "${label} was not supplied for non-interactive execution"
+  if ! exec 3<>/dev/tty 2>/dev/null; then
+    die "${label} requires a terminal; rerun from an administrator terminal"
+  fi
+  if [[ -n ${default_value} ]]; then
+    printf '%s [%s]: ' "${label}" "${default_value}" >&3
+  else
+    printf '%s: ' "${label}" >&3
+  fi
+  IFS= read -r value <&3 || die "could not read ${label}"
+  exec 3>&-
+  if [[ -z ${value} ]]; then
+    value=${default_value}
+  fi
+  printf -v "${destination_name}" '%s' "${value}"
+}
+
+prompt_secret() {
+  local destination_name=$1 label=$2 optional=${3:-0} value
+
+  [[ ${LABGATE_INSTALL_NONINTERACTIVE:-0} != 1 ]] \
+    || die "${label} was not supplied for non-interactive execution"
+  if ! exec 3<>/dev/tty 2>/dev/null; then
+    die "${label} requires a terminal; rerun from an administrator terminal"
+  fi
+  if (( optional == 1 )); then
+    printf '%s (optional; press Enter to skip): ' "${label}" >&3
+  else
+    printf '%s: ' "${label}" >&3
+  fi
+  IFS= read -r -s value <&3 || die "could not read ${label}"
+  printf '\n' >&3
+  exec 3>&-
+  printf -v "${destination_name}" '%s' "${value}"
+}
+
+validate_public_key_line() {
+  local key_data key_type line=$1 remainder
+
+  (( ${#line} >= 32 && ${#line} <= 16384 )) || return 1
+  [[ ${line} != *[[:cntrl:]]* ]] || return 1
+  [[ ${line} == 'ssh-ed25519 '* ]] || return 1
+  IFS=' ' read -r key_type key_data remainder <<<"${line}"
+  [[ ${key_type} == ssh-ed25519 \
+    && ${key_data} =~ ^[A-Za-z0-9+/]+={0,3}$ ]]
+}
+
+validate_public_key_file_shape() {
+  local extra key_file=$1 line
+
+  exec 4<"${key_file}" || return 1
+  if ! IFS= read -r line <&4; then
+    if [[ -z ${line} ]]; then
+      exec 4>&-
+      return 1
+    fi
+  fi
+  if IFS= read -r extra <&4 || [[ -n ${extra} ]]; then
+    exec 4>&-
+    return 1
+  fi
+  exec 4>&-
+  validate_public_key_line "${line}"
+}
+
+public_key_fingerprint() {
+  local bits fingerprint key_file=$1 output type
+
+  output=$(ssh-keygen -lf "${key_file}" -E sha256 2>/dev/null) || return 1
+  [[ -n ${output} && ${output} != *$'\n'* ]] || return 1
+  bits=$(awk '{ print $1 }' <<<"${output}")
+  fingerprint=$(awk '{ print $2 }' <<<"${output}")
+  type=$(awk '{ print $NF }' <<<"${output}")
+  [[ ${bits} == 256 && ${type} == '(ED25519)' \
+    && ${fingerprint} =~ ^SHA256:[A-Za-z0-9+/]{43}$ ]] || return 1
+  printf '%s\n' "${fingerprint}"
+}
+
+validate_source_tree() {
+  local file
+  local -a required_files=(
+    00-labgate-deny-guest.rules
+    guest-account.sh
+    guest-boot-lock.service
+    guest-boot-lock.sh
+    guest-cleanup.service
+    guest-cleanup.sh
+    guest-cleanup.timer
+    guest-heartbeat.service
+    guest-heartbeat.sh
+    guest-heartbeat.timer
+    guest-session-hook.sh
+    guest-webhook-flush.service
+    guest-webhook-flush.sh
+    guest-webhook-flush.timer
+    install-machine.sh
+    labgate-common.sh
+    labgate-deny-guest-account-change.sh
+    labgate-guest.conf
+    labgate-provisioner.conf
+    labgate-provisioner-dispatch.sh
+    setup-machine.sh
+    sshd-labgate-guest.conf
+    sudoers-guest-provision
+  )
+
+  for file in "${required_files[@]}"; do
+    [[ -f ${source_directory}/${file} && ! -L ${source_directory}/${file} ]] \
+      || die "source archive is missing a safe machine-side artifact: ${file}"
+  done
+  for file in \
+    guest-account.sh guest-boot-lock.sh guest-cleanup.sh guest-heartbeat.sh \
+    guest-session-hook.sh guest-webhook-flush.sh install-machine.sh \
+    labgate-common.sh setup-machine.sh; do
+    bash -n "${source_directory}/${file}" \
+      || die "source archive contains invalid Bash syntax: ${file}"
+  done
+  sh -n "${source_directory}/labgate-provisioner-dispatch.sh" \
+    || die "source archive contains an invalid provisioner dispatcher"
+  sh -n "${source_directory}/labgate-deny-guest-account-change.sh" \
+    || die "source archive contains an invalid account-change guard"
+}
+
+stage_source_tree() {
+  local api_response archive extracted_root
+
+  if (( local_source == 1 )); then
+    source_directory=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+    source_revision='local checkout'
+    validate_source_tree
+    return
+  fi
+
+  require_command curl
+  require_command tar
+  require_command sed
+  if [[ -n ${requested_commit} ]]; then
+    source_revision=${requested_commit}
+  else
+    new_runtime_file api_response
+    curl --fail --silent --show-error \
+      --proto '=https' --tlsv1.2 \
+      --connect-timeout 5 --max-time 20 \
+      --output "${api_response}" \
+      --url "https://api.github.com/repos/${REPOSITORY_OWNER}/${REPOSITORY_NAME}/commits/${DEFAULT_REF}" \
+      || die "could not resolve ${DEFAULT_REF} to an immutable Git commit"
+    source_revision=$(sed -n \
+      's/^[[:space:]]*"sha":[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' \
+      "${api_response}" | sed -n '1p')
+    [[ ${source_revision} =~ ^[0-9a-f]{40}$ ]] \
+      || die "GitHub did not return a canonical commit SHA"
+  fi
+
+  new_runtime_file archive
+  mkdir -m 0700 "${runtime_directory}/source"
+  curl --fail --silent --show-error \
+    --proto '=https' --tlsv1.2 \
+    --connect-timeout 5 --max-time 60 \
+    --output "${archive}" \
+    --url "https://codeload.github.com/${REPOSITORY_OWNER}/${REPOSITORY_NAME}/tar.gz/${source_revision}" \
+    || die "could not download the reviewed LabGate source archive"
+  tar -xzf "${archive}" -C "${runtime_directory}/source" --no-same-owner \
+    || die "could not extract the LabGate source archive"
+  extracted_root=$(find "${runtime_directory}/source" \
+    -mindepth 1 -maxdepth 1 -type d -print -quit)
+  [[ -n ${extracted_root} ]] || die "LabGate source archive has no root directory"
+  source_directory=${extracted_root}/machine-setup
+  validate_source_tree
+}
+
+read_safe_config_default() {
+  local destination_name=$1 fallback=$3 path=$2 value
+
+  if [[ -e ${path} || -L ${path} ]]; then
+    [[ -f ${path} && ! -L ${path} ]] || die "unsafe existing configuration: ${path}"
+    if [[ ${EUID} -eq 0 ]]; then
+      [[ $(stat -c '%u' -- "${path}") == 0 ]] \
+        || die "existing configuration is not root-owned: ${path}"
+      IFS= read -r value <"${path}" || die "could not read ${path}"
+      printf -v "${destination_name}" '%s' "${value}"
+      return
+    fi
+  fi
+  printf -v "${destination_name}" '%s' "${fallback}"
+}
+
+provisioner_authorized_keys_path() {
+  local home record
+
+  if record=$(getent passwd provisioner 2>/dev/null); then
+    IFS=: read -r _ _ _ _ _ home _ <<<"${record}"
+    [[ -n ${home} && ${home} != /home/guest ]] || return 1
+  else
+    home=${PROVISIONER_HOME}
+  fi
+  printf '%s/.ssh/authorized_keys\n' "${home}"
+}
+
+install_ubuntu_dependencies() {
+  local package
+  local -a packages=(
+    ca-certificates coreutils curl findutils grep keyutils libpam-modules
+    libpam-modules-bin login mawk openssh-client openssh-server passwd
+    policykit-1 procps sudo systemd systemd-sysv tar util-linux
+  )
+
+  require_command apt-get
+  DEBIAN_FRONTEND=noninteractive apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    "${packages[@]}"
+  for package in \
+    curl getent keyctl pkaction sshd ssh-keygen systemctl systemd-sysusers \
+    tailscale timedatectl visudo; do
+    if [[ ${package} == tailscale ]]; then
+      continue
+    fi
+    require_command "${package}"
+  done
+}
+
+ensure_clock_and_ssh() {
+  local synchronized
+
+  sshd -t || die "OpenSSH configuration is invalid"
+  if systemctl list-unit-files ssh.service >/dev/null 2>&1; then
+    systemctl enable --now ssh.service >/dev/null
+  elif systemctl list-unit-files sshd.service >/dev/null 2>&1; then
+    systemctl enable --now sshd.service >/dev/null
+  else
+    die "OpenSSH Server did not install an SSH service"
+  fi
+
+  synchronized=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null || true)
+  if [[ ${synchronized} != yes ]]; then
+    timedatectl set-ntp true >/dev/null 2>&1 || true
+    for _ in {1..30}; do
+      synchronized=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null || true)
+      [[ ${synchronized} == yes ]] && break
+      sleep 1
+    done
+  fi
+  [[ ${synchronized} == yes ]] \
+    || die "system clock did not become NTP-synchronized within 30 seconds"
+}
+
+ensure_tailscale() {
+  local tailscale_installer tailscale_key_file
+
+  if ! command -v tailscale >/dev/null 2>&1; then
+    new_runtime_file tailscale_installer
+    curl --fail --silent --show-error \
+      --proto '=https' --tlsv1.2 \
+      --connect-timeout 5 --max-time 60 \
+      --output "${tailscale_installer}" \
+      --url https://tailscale.com/install.sh \
+      || die "could not download the official Tailscale installer"
+    sh "${tailscale_installer}" \
+      || die "the official Tailscale installer failed"
+  fi
+  require_command tailscale
+  systemctl enable --now tailscaled.service >/dev/null \
+    || die "could not start tailscaled.service"
+
+  if ! tailscale_is_connected; then
+    if [[ -n ${tailscale_auth_key} ]]; then
+      [[ ${tailscale_auth_key} != *$'\n'* && ${tailscale_auth_key} != *$'\r'* \
+        && ${#tailscale_auth_key} -le 512 ]] \
+        || die "Tailscale auth key is malformed"
+      new_runtime_file tailscale_key_file
+      printf '%s\n' "${tailscale_auth_key}" >"${tailscale_key_file}"
+      tailscale up --auth-key="file:${tailscale_key_file}" \
+        || die "Tailscale authentication failed"
+      : >"${tailscale_key_file}"
+    else
+      tailscale up || die "interactive Tailscale authentication failed"
+    fi
+  fi
+  tailscale_auth_key=
+  unset TAILSCALE_AUTH_KEY 2>/dev/null || true
+  tailscale_is_connected \
+    || die "Tailscale is installed but not connected to the tailnet"
+}
+
+validate_tailscale_ipv4() {
+  local ip=$1
+  local -a octets
+
+  IFS=. read -r -a octets <<<"${ip}"
+  (( ${#octets[@]} == 4 )) || return 1
+  [[ ${octets[0]} == 100 \
+    && ${octets[1]} =~ ^(0|[1-9][0-9]{0,2})$ \
+    && ${octets[2]} =~ ^(0|[1-9][0-9]{0,2})$ \
+    && ${octets[3]} =~ ^(0|[1-9][0-9]{0,2})$ ]] || return 1
+  (( 10#${octets[1]} >= 64 && 10#${octets[1]} <= 127 \
+    && 10#${octets[2]} <= 255 && 10#${octets[3]} <= 255 ))
+}
+
+tailscale_is_connected() {
+  command -v tailscale >/dev/null 2>&1 \
+    && command -v timeout >/dev/null 2>&1 \
+    && timeout --signal=KILL 3 tailscale status >/dev/null 2>&1
+}
+
+check_pi_health() {
+  local body http_status
+
+  new_runtime_file body
+  if ! http_status=$(curl --silent --show-error \
+    --connect-timeout 3 --max-time 10 --max-filesize 4096 --noproxy '*' \
+    --output "${body}" --write-out '%{http_code}' \
+    --url "${api_url}/api/health"); then
+    die "could not reach the Pi health endpoint at ${api_url}"
+  fi
+  [[ ${http_status} == 200 ]] \
+    || die "Pi health endpoint returned HTTP ${http_status}"
+  [[ $(<"${body}") == "${EXPECTED_HEALTH_JSON}" ]] \
+    || die "Pi health endpoint is not a compatible LabGate enrollment API v${EXPECTED_ENROLLMENT_VERSION}"
+}
+
+check_registration_readiness() {
+  local auth_config body http_status
+
+  labgate_validate_registration_secret "${registration_secret}" \
+    || die "registration secret is not a valid 20-256 character RFC 6750 b64token"
+  new_runtime_file auth_config
+  new_runtime_file body
+  {
+    printf 'header = "Authorization: Bearer %s"\n' "${registration_secret}"
+    printf 'header = "Accept: application/json"\n'
+  } >"${auth_config}"
+  if ! http_status=$(curl --config "${auth_config}" \
+    --silent --show-error --connect-timeout 3 --max-time 10 \
+    --max-filesize 4096 --noproxy '*' \
+    --output "${body}" --write-out '%{http_code}' \
+    --url "${api_url}/api/admin/register-machine"); then
+    die "could not reach the Pi registration-readiness endpoint"
+  fi
+  : >"${auth_config}"
+  [[ ${http_status} == 200 ]] \
+    || die "Pi registration-readiness endpoint returned HTTP ${http_status}"
+  [[ $(<"${body}") == "${EXPECTED_REGISTRATION_JSON}" ]] \
+    || die "Pi registration-readiness response is incompatible"
+}
+
+account_password_is_locked() {
+  local account=$1 reported_account status
+
+  read -r reported_account status _ < <(passwd -S "${account}" 2>/dev/null) \
+    || return 1
+  [[ ${reported_account} == "${account}" && ${status} =~ ^(L|LK)$ ]]
+}
+
+verify_nologin() {
+  local mode target
+
+  target=$(readlink -f -- /usr/sbin/nologin 2>/dev/null || true)
+  [[ -n ${target} && -f ${target} && ! -L ${target} && -x ${target} \
+    && $(stat -c '%u' -- "${target}") == 0 ]] || return 1
+  mode=$(stat -c '%a' -- "${target}") || return 1
+  (( (8#${mode} & 8#022) == 0 ))
+}
+
+prepare_provisioner() {
+  local gid home mode name record shell uid
+
+  verify_nologin \
+    || die "/usr/sbin/nologin is not a safe root-controlled executable"
+  if ! getent passwd provisioner >/dev/null; then
+    (( fresh_install == 1 )) \
+      || die "existing enrollment has no provisioner identity"
+    install -d -o root -g root -m 0755 /etc/sysusers.d
+    install -o root -g root -m 0644 \
+      "${source_directory}/labgate-provisioner.conf" "${PROVISIONER_SYSUSERS}"
+    systemd-sysusers "${PROVISIONER_SYSUSERS}" \
+      || die "systemd-sysusers could not create the provisioner identity"
+  fi
+
+  record=$(getent passwd provisioner) || die "provisioner identity is missing"
+  IFS=: read -r name _ uid gid _ home shell <<<"${record}"
+  [[ ${name} == provisioner && ${uid} != 0 && ${home} != /home/guest \
+    && -n ${gid} ]] || die "provisioner identity is unsafe"
+  if [[ ! -e ${home} ]]; then
+    [[ ${home} == "${PROVISIONER_HOME}" ]] \
+      || die "refusing to create an unexpected provisioner home"
+    install -d -o root -g root -m 0755 "${home}"
+  fi
+  [[ -d ${home} && ! -L ${home} && $(stat -c '%u' -- "${home}") == 0 ]] \
+    || die "provisioner home must be a root-owned real directory"
+  mode=$(stat -c '%a' -- "${home}")
+  (( (8#${mode} & 8#022) == 0 )) \
+    || die "provisioner home must not be group- or world-writable"
+  if (( fresh_install == 1 )); then
+    [[ $(readlink -f -- "${shell}" 2>/dev/null || true) \
+      == $(readlink -f -- /usr/sbin/nologin) ]] \
+      || die "fresh provisioner identity must begin with nologin"
+  fi
+  install -d -o "${uid}" -g "${gid}" -m 0700 "${home}/.ssh"
+  passwd -l provisioner >/dev/null 2>&1 \
+    || die "could not lock the provisioner password"
+  account_password_is_locked provisioner \
+    || die "provisioner password is not locked"
+  if (( fresh_install == 1 )); then
+    [[ ! -e ${home}/.ssh/authorized_keys && ! -L ${home}/.ssh/authorized_keys ]] \
+      || die "fresh provisioner identity already has an authorized key"
+  fi
+}
+
+install_provisioner_key() {
+  local authorized_keys gid home record staged uid
+
+  record=$(getent passwd provisioner) || die "provisioner identity is missing"
+  IFS=: read -r _ _ uid gid _ home _ <<<"${record}"
+  authorized_keys=${home}/.ssh/authorized_keys
+  [[ ! -e ${authorized_keys} && ! -L ${authorized_keys} ]] \
+    || die "refusing to overwrite an existing provisioner authorized_keys file"
+  staged=${home}/.ssh/.authorized_keys.labgate.$$
+  [[ ! -e ${staged} && ! -L ${staged} ]] \
+    || die "temporary authorized_keys path already exists"
+  install -o "${uid}" -g "${gid}" -m 0600 "${public_key_file}" "${staged}"
+  if ! ln -- "${staged}" "${authorized_keys}"; then
+    rm -f -- "${staged}"
+    die "could not publish the provisioner key without overwriting state"
+  fi
+  rm -f -- "${staged}"
+  [[ -f ${authorized_keys} && ! -L ${authorized_keys} \
+    && $(stat -c '%u:%g:%a' -- "${authorized_keys}") == "${uid}:${gid}:600" ]] \
+    || die "installed provisioner key has unsafe metadata"
+}
+
+verify_existing_provisioner_key() {
+  local authorized_keys=$1 gid home mode owner record uid
+
+  record=$(getent passwd provisioner) || die "provisioner identity is missing"
+  IFS=: read -r _ _ uid gid _ home _ <<<"${record}"
+  [[ ${authorized_keys} == "${home}/.ssh/authorized_keys" \
+    && -f ${authorized_keys} && ! -L ${authorized_keys} ]] \
+    || die "existing provisioner key path is unsafe"
+  owner=$(stat -c '%u' -- "${authorized_keys}")
+  mode=$(stat -c '%a' -- "${authorized_keys}")
+  [[ ${owner} == 0 || ${owner} == "${uid}" ]] \
+    || die "existing provisioner key must be root- or provisioner-owned"
+  (( (8#${mode} & 8#077) == 0 )) \
+    || die "existing provisioner key must not be accessible by group or world"
+  public_key_fingerprint "${authorized_keys}" >/dev/null \
+    || die "existing provisioner key is not one Ed25519 key"
+}
+
+run_hardened_setup() {
+  export LABGATE_API_URL=${api_url}
+  export LABGATE_MACHINE_NAME=${machine_name}
+  export LABGATE_PASSWORD_LENGTH=${password_length}
+  export NO_PROXY='*'
+  export no_proxy='*'
+  unset LABGATE_PAM_FILE LABGATE_MIGRATE_LEGACY_OUTBOX 2>/dev/null || true
+  if (( fresh_install == 1 )); then
+    export LABGATE_REGISTRATION_SECRET=${registration_secret}
+  else
+    unset LABGATE_REGISTRATION_SECRET 2>/dev/null || true
+  fi
+  bash "${source_directory}/setup-machine.sh"
+  registration_secret=
+  unset LABGATE_REGISTRATION_SECRET 2>/dev/null || true
+}
+
+verify_installation() {
+  local unit
+
+  account_password_is_locked guest || die "guest is not locked after installation"
+  systemctl is-active --quiet guest-boot-lock.service \
+    || die "guest-boot-lock.service is not active"
+  for unit in \
+    guest-cleanup.timer guest-heartbeat.timer guest-webhook-flush.timer; do
+    systemctl is-enabled --quiet "${unit}" \
+      || die "${unit} is not enabled"
+    systemctl is-active --quiet "${unit}" \
+      || die "${unit} is not active"
+  done
+  systemctl start guest-heartbeat.service \
+    || die "initial safe heartbeat service failed"
+}
+
+while (( $# > 0 )); do
+  case "$1" in
+    --dry-run)
+      dry_run=1
+      ;;
+    --local)
+      local_source=1
+      ;;
+    --commit)
+      shift
+      (( $# > 0 )) || die "--commit requires a 40-character SHA"
+      requested_commit=$1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown option: $1"
+      ;;
+  esac
+  shift
+done
+
+(( local_source == 0 || ${#requested_commit} == 0 )) \
+  || die "--local and --commit are mutually exclusive"
+if [[ -n ${requested_commit} ]]; then
+  [[ ${requested_commit} =~ ^[0-9a-f]{40}$ ]] \
+    || die "--commit must be one lowercase 40-character Git SHA"
+fi
+if (( dry_run == 0 && EUID != 0 )); then
+  die "must run as root; pipe the installer to sudo bash"
+fi
+
+runtime_directory=$(mktemp -d "/tmp/labgate-install.XXXXXX") \
+  || die "could not create a private runtime directory"
+chmod 0700 "${runtime_directory}"
+stage_source_tree
+
+# shellcheck source=labgate-common.sh
+source "${source_directory}/labgate-common.sh" \
+  || die "could not load the reviewed LabGate validation library"
+
+[[ -r /etc/os-release ]] || die "could not identify the operating system"
+# shellcheck source=/etc/os-release
+source /etc/os-release
+os_support='Ubuntu Desktop confirmed'
+if [[ ${ID:-} != ubuntu ]]; then
+  if (( dry_run == 0 )); then
+    die "the one-shot installer supports Ubuntu Desktop only"
+  fi
+  os_support="unsupported ${PRETTY_NAME:-${ID:-unknown}}; real installation would stop"
+fi
+fresh_install=1
+if [[ -e ${CONFIG_DIRECTORY}/webhook-token || -L ${CONFIG_DIRECTORY}/webhook-token ]]; then
+  [[ -f ${CONFIG_DIRECTORY}/webhook-token && ! -L ${CONFIG_DIRECTORY}/webhook-token ]] \
+    || die "existing webhook identity is unsafe"
+  [[ -s ${CONFIG_DIRECTORY}/webhook-token ]] \
+    || die "existing webhook identity is empty"
+  fresh_install=0
+fi
+
+read_safe_config_default existing_api_url \
+  "${CONFIG_DIRECTORY}/api-url" ''
+read_safe_config_default existing_password_length \
+  "${CONFIG_DIRECTORY}/password-length" '8'
+api_url=${LABGATE_API_URL:-}
+machine_name=${LABGATE_MACHINE_NAME:-$(hostname -s)}
+password_length=${LABGATE_PASSWORD_LENGTH:-}
+[[ -n ${api_url} ]] || prompt_value api_url 'Pi LabGate API origin' "${existing_api_url}"
+if (( fresh_install == 1 )) && [[ ! ${LABGATE_MACHINE_NAME+x} ]]; then
+  prompt_value machine_name 'Unique machine name' "${machine_name}"
+fi
+[[ -n ${password_length} ]] \
+  || prompt_value password_length 'Guest password length' "${existing_password_length}"
+
+labgate_validate_api_origin "${api_url}" \
+  || die "Pi API must be a canonical origin-only HTTP(S) URL"
+[[ ${machine_name} =~ ^[A-Za-z0-9._\ -]{1,64}$ ]] \
+  || die "machine name contains unsupported characters"
+[[ ${password_length} =~ ^[0-9]{1,3}$ \
+  && 10#${password_length} -ge 8 && 10#${password_length} -le 128 ]] \
+  || die "guest password length must be between 8 and 128"
+if (( fresh_install == 1 )); then
+  registration_secret=${provided_registration_secret}
+  provided_registration_secret=
+  [[ -n ${registration_secret} ]] \
+    || prompt_secret registration_secret 'Machine registration secret'
+  labgate_validate_registration_secret "${registration_secret}" \
+    || die "registration secret is not a valid 20-256 character RFC 6750 b64token"
+fi
+provided_registration_secret=
+
+tailscale_state='already connected'
+tailscale_auth_key=${provided_tailscale_auth_key}
+provided_tailscale_auth_key=
+if [[ -n ${tailscale_auth_key} ]]; then
+  tailscale_state='auth key supplied; connection will be verified'
+elif ! tailscale_is_connected; then
+  tailscale_state='installation or tailnet login required'
+  prompt_secret tailscale_auth_key 'Tailscale auth key' 1
+fi
+authorized_keys=$(provisioner_authorized_keys_path) \
+  || die "could not determine the provisioner authorized_keys path"
+needs_public_key=0
+if [[ -e ${authorized_keys} || -L ${authorized_keys} ]]; then
+  [[ -f ${authorized_keys} && ! -L ${authorized_keys} ]] \
+    || die "provisioner authorized_keys path is unsafe"
+  (( fresh_install == 0 )) \
+    || die "fresh enrollment requires a provisioner identity with no authorized key"
+  public_key_file=${authorized_keys}
+else
+  needs_public_key=1
+  public_key_file=${LABGATE_PROVISIONER_PUBLIC_KEY_FILE:-}
+  if [[ -n ${public_key_file} ]]; then
+    [[ -f ${public_key_file} && ! -L ${public_key_file} ]] \
+      || die "provisioner public-key input file is unsafe"
+  else
+    prompt_value public_key_line 'Paste the Pi provisioner Ed25519 public key'
+    validate_public_key_line "${public_key_line}" \
+      || die "provisioner public key must be one plain ssh-ed25519 key"
+    new_runtime_file public_key_file
+    printf '%s\n' "${public_key_line}" >"${public_key_file}"
+    public_key_line=
+  fi
+fi
+
+key_fingerprint='validation follows prerequisite installation'
+if command -v ssh-keygen >/dev/null 2>&1; then
+  validate_public_key_file_shape "${public_key_file}" \
+    || die "provisioner public key must be one plain ssh-ed25519 key"
+  key_fingerprint=$(public_key_fingerprint "${public_key_file}") \
+    || die "provisioner public key must be one valid Ed25519 key"
+fi
+
+if (( fresh_install == 1 )); then
+  install_mode='Fresh enrollment'
+  registration_summary='supplied (hidden)'
+  machine_summary=${machine_name}
+else
+  install_mode='Safe update; registered identity unchanged'
+  registration_summary='not required for an existing identity'
+  machine_summary='existing registered endpoint (name unchanged)'
+fi
+printf '\nLabGate physical machine installer\n'
+printf '%-20s %s\n' 'Mode:' "${install_mode}"
+printf '%-20s %s\n' 'Source revision:' "${source_revision}"
+printf '%-20s %s\n' 'Target OS:' "${os_support}"
+printf '%-20s %s\n' 'Machine:' "${machine_summary}"
+printf '%-20s %s\n' 'Pi API:' "${api_url}"
+printf '%-20s %s\n' 'Pi preflight:' 'health and enrollment compatibility will be checked'
+printf '%-20s %s\n' 'Password length:' "${password_length}"
+printf '%-20s %s\n' 'Tailscale:' "${tailscale_state}"
+printf '%-20s %s\n' 'Provisioner key:' "${key_fingerprint}"
+printf '%-20s %s\n' 'Registration key:' "${registration_summary}"
+printf '\nPlanned changes:\n'
+printf '  1. Install the fixed Ubuntu prerequisites and verify clock/SSH.\n'
+printf '  2. Connect this endpoint to Tailscale.\n'
+printf '  3. Verify the Pi health endpoint and enrollment protocol v%s.\n' \
+  "${EXPECTED_ENROLLMENT_VERSION}"
+if (( fresh_install == 1 )); then
+  printf '  4. Authenticate registration readiness without changing Pi data.\n'
+fi
+printf '  5. Apply the reviewed guest, PAM, Polkit, sudoers, SSH, and timer policy.\n'
+if (( needs_public_key == 1 )); then
+  printf '  6. Publish the provisioner key only after hardened setup succeeds.\n'
+fi
+
+if (( dry_run == 1 )); then
+  printf '\nDry run complete; no host or Pi state was changed.\n'
+  exit 0
+fi
+
+[[ ${LABGATE_INSTALL_NONINTERACTIVE:-0} != 1 ]] \
+  || die "interactive confirmation is required for a real installation"
+if ! exec 3<>/dev/tty 2>/dev/null; then
+  die "interactive confirmation requires an administrator terminal"
+fi
+printf '\nContinue? [y/N]: ' >&3
+IFS= read -r confirmation <&3 || die "could not read confirmation"
+exec 3>&-
+case "${confirmation}" in
+  y|Y|yes|YES|Yes) ;;
+  *) die "installation cancelled" ;;
+esac
+
+printf '\n[1/8] Installing Ubuntu prerequisites\n'
+install_ubuntu_dependencies
+validate_public_key_file_shape "${public_key_file}" \
+  || die "provisioner public key must be one plain ssh-ed25519 key"
+key_fingerprint=$(public_key_fingerprint "${public_key_file}") \
+  || die "provisioner public key must be one valid Ed25519 key"
+
+printf '[2/8] Verifying clock synchronization and administrator SSH\n'
+ensure_clock_and_ssh
+
+printf '[3/8] Connecting the endpoint to Tailscale\n'
+ensure_tailscale
+tailscale_ip=$(timeout --signal=KILL 5 tailscale ip -4 | sed -n '1p')
+validate_tailscale_ipv4 "${tailscale_ip}" \
+  || die "Tailscale did not assign one canonical CGNAT IPv4 address"
+
+printf '[4/8] Checking the Pi health and enrollment endpoints\n'
+check_pi_health
+if (( fresh_install == 1 )); then
+  check_registration_readiness
+fi
+
+printf '[5/8] Preparing the locked provisioner boundary\n'
+prepare_provisioner
+if (( needs_public_key == 0 )); then
+  verify_existing_provisioner_key "${authorized_keys}"
+fi
+
+printf '[6/8] Applying the hardened LabGate machine setup\n'
+run_hardened_setup
+
+printf '[7/8] Publishing the key last and sending a safe heartbeat\n'
+if (( needs_public_key == 1 )); then
+  install_provisioner_key
+fi
+verify_installation
+
+printf '[8/8] Verifying the Pi endpoint after installation\n'
+check_pi_health
+
+printf '\nLabGate machine installation complete\n'
+printf '%-24s %s\n' 'Machine:' "${machine_summary}"
+printf '%-24s %s\n' 'Pi enrollment API:' "healthy; protocol v${EXPECTED_ENROLLMENT_VERSION}"
+if (( fresh_install == 1 )); then
+  printf '%-24s %s\n' 'Registration access:' 'accepted'
+else
+  printf '%-24s %s\n' 'Registered identity:' 'preserved'
+fi
+printf '%-24s %s\n' 'Tailscale address:' "${tailscale_ip}"
+printf '%-24s %s\n' 'SSH host-key pin:' "$(<"${CONFIG_DIRECTORY}/ssh-host-key-sha256")"
+printf '%-24s %s\n' 'Provisioner key:' "${key_fingerprint}"
+printf '%-24s %s\n' 'Guest account:' 'locked'
+printf '%-24s %s\n' 'Lifecycle timers:' 'enabled and active'
+printf '\nThe initial safe heartbeat was attempted. Confirm the machine becomes\n'
+printf 'available in the LabGate dashboard, then complete the physical Phase 8 checks.\n'
