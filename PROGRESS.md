@@ -89,7 +89,7 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
 
 ### Delivery and operations documentation
 
-- [ ] Commit and push every project-file change locally before the Raspberry Pi
+- [x] Commit and push every project-file change locally before the Raspberry Pi
   pulls it; limit direct Pi edits to ignored environment/configuration data.
 - [ ] Deploy the reviewed commit on the Pi and record post-deploy health and
   migration evidence.
@@ -107,6 +107,11 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   Pi was previously observed at `66c3b72`; it is currently offline in Tailscale
   (`LastSeen=2026-07-13T19:49:12.1Z`) and SSH times out, so its current HEAD and
   deployment state cannot yet be re-confirmed.
+- 2026-07-14 delivery: the reviewed implementation and documentation were
+  committed locally as `a8102fbdde75bedb34ba11b2a450627a7d2e4abb` and pushed to
+  `origin/main` before any tracked Pi file was changed. This tracker evidence is
+  the only follow-up project-file change and is committed/pushed separately
+  before the Pi is allowed to pull.
 - 2026-07-14 physical-host inventory: the designated workstation is
   EndeavourOS rolling with SDDM, not the contract's Ubuntu Desktop/GDM target.
   Existing accounts are `guest` UID 950 and `provisioner` UID 951. Legacy
