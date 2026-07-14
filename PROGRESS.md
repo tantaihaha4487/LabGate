@@ -131,6 +131,13 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   registration readiness, Pi checks before local identity changes, and
   provisioner-key publication only after hardened setup. No live Ubuntu
   Desktop enrollment was performed, so Phase 8 remains unchecked.
+- 2026-07-14 live SSH-policy compatibility: EndeavourOS OpenSSH rejected
+  `PermitUserEnvironment` inside the constrained `Match User provisioner`
+  block and the installer restored the prior SSH configuration. The reviewed
+  fix places the same `PermitUserEnvironment no` restriction in the global
+  root-owned LabGate drop-in and keeps effective-policy verification for the
+  provisioner. The focused 27-case rootless machine suite, lint, TypeScript,
+  shell syntax, and diff checks pass; live installation remains in progress.
 - 2026-07-14 container gate: `labgate:audit-final` built successfully. From a
   blank private bind mount it applied all four migrations, passed database
   postflight, started as UID/GID 1000, created `/app/data` and the database with

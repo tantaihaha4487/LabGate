@@ -314,7 +314,6 @@ install_sshd_policy() {
     printf '    KerberosAuthentication no\n'
     printf '    PermitEmptyPasswords no\n'
     printf '    PermitUserRC no\n'
-    printf '    PermitUserEnvironment no\n'
     printf '    DisableForwarding yes\n'
     printf '    AllowAgentForwarding no\n'
     printf '    AllowTcpForwarding no\n'

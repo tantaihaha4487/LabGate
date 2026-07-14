@@ -45,6 +45,9 @@ prepare_fixture() {
   install -m 0644 \
     "${REPOSITORY_ROOT}/machine-setup/00-labgate-deny-guest.rules" \
     "${fixture}/source/machine-setup/00-labgate-deny-guest.rules"
+  install -m 0644 \
+    "${REPOSITORY_ROOT}/machine-setup/sshd-labgate-guest.conf" \
+    "${fixture}/source/machine-setup/sshd-labgate-guest.conf"
   install -m 0755 \
     "${REPOSITORY_ROOT}/machine-setup/setup-machine.sh" \
     "${fixture}/source/machine-setup/setup-machine.sh"
@@ -1398,7 +1401,11 @@ test_static_polkit_policy() {
   grep -Fq 'sudo -n -l -U guest' "${setup}" || return 1
   grep -Fq 'sudo_audit_expected="User guest is not allowed to run sudo on ${sudo_audit_hostname}."' \
     "${setup}" || return 1
-  grep -Fq "printf '    PermitUserEnvironment no\\n'" "${setup}" || return 1
+  grep -Fq 'PermitUserEnvironment no' \
+    /mnt/source/machine-setup/sshd-labgate-guest.conf || return 1
+  if grep -Fq "printf '    PermitUserEnvironment no\\n'" "${setup}"; then
+    return 1
+  fi
   grep -Fq 'passwd -l provisioner' "${setup}" || return 1
   grep -Fq "PAM_PROVISIONER_DENY_LINE='account requisite pam_succeed_if.so quiet user != provisioner'" \
     "${setup}" || return 1
