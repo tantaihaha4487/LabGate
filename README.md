@@ -172,9 +172,9 @@ the development machine, validate it, commit it, push it, and only then update
 the Pi with a fast-forward pull. Runtime-only configuration such as `.env.local`
 and root-owned secret files may be changed directly on the Pi.
 
-The safe production sequence—including SQLite backup, duplicate-active-row
-preflight, migration inspection, pull, Compose rollout, health checks, and
-rollback—is in the [documentation hub](docs/README.md).
+The safe production sequence—including the verified SQLite save command,
+duplicate-active-row preflight, migration inspection, pull, Compose rollout,
+health checks, and rollback—is in the [documentation hub](docs/README.md).
 
 The first lifecycle-protocol rollout has a mandatory drained upgrade gate: stop
 checkout, enumerate and physically secure every unrevoked database generation,
