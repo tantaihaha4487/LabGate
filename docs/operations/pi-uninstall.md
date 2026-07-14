@@ -1,6 +1,6 @@
 # Remove the Pi application
 
-[Operations index](README.md) · [Full reference](../OPERATIONS.md) · [Back to README](../../README.md)
+[Operations index](README.md) · [Documentation hub](../README.md) · [Back to README](../../README.md)
 
 This removes LabGate from the Pi only. It does not erase enrolled endpoints.
 Decommission or quarantine every endpoint first, and retain the database backup

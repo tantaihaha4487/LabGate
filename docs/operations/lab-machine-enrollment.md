@@ -1,6 +1,6 @@
 # Enroll a lab machine
 
-[Operations index](README.md) · [Full reference](../OPERATIONS.md) · [Back to README](../../README.md)
+[Operations index](README.md) · [Documentation hub](../README.md) · [Back to README](../../README.md)
 
 Run this procedure once per physical Ubuntu Desktop endpoint. Each endpoint
 needs Tailscale, OpenSSH Server, PAM, Polkit, systemd, `curl`, `sudo`, `keyctl`,
@@ -32,4 +32,4 @@ Install the staged public key only after setup succeeds. Repeat with a different
 machine name for Machine 2. The installer detects each endpoint's Tailscale IP
 and SSH host-key pin and obtains a separate webhook token.
 
-See the [complete enrollment reference](../OPERATIONS.md#3-enroll-a-lab-machine).
+See [AGENTS.md](../../AGENTS.md) before changing machine-side security policy.

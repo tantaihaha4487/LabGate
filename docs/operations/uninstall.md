@@ -1,6 +1,6 @@
 # Uninstall or decommission
 
-[Operations index](README.md) · [Full reference](../OPERATIONS.md) · [Back to README](../../README.md)
+[Operations index](README.md) · [Documentation hub](../README.md) · [Back to README](../../README.md)
 
 There is no safe one-command uninstall. Decommissioning is a security change:
 
@@ -11,7 +11,5 @@ There is no safe one-command uninstall. Decommissioning is a security change:
 5. Back up PAM files, remove only LabGate PAM hooks, and verify no hook remains.
 6. Keep guest SSH denial, provisioner forced-command restrictions, and boot lock until the shared identity is deliberately retired through a reviewed process.
 
-See [temporary disable](../OPERATIONS.md#temporarily-disable-the-display-manager-hook)
-and [fully remove PAM integration](../OPERATIONS.md#fully-remove-labgate-pam-integration)
-for the exact commands. Do not delete `/etc/labgate` or the machine database row
-as a shortcut.
+Do not delete `/etc/labgate` or the machine database row as a shortcut. Keep
+the endpoint quarantined until its exact credential state is reconciled.

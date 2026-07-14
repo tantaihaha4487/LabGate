@@ -12,7 +12,7 @@ same account rather than creating or deleting student identities.
 
 > [!IMPORTANT]
 > Physical end-to-end validation is a release gate. Check [PROGRESS.md](PROGRESS.md)
-> and execute [docs/E2E-TESTING.md](docs/E2E-TESTING.md) before treating a machine
+> and complete the physical acceptance checks in the [operations guides](docs/operations/operations-and-recovery.md) before treating a machine
 > as ready for students.
 
 ## Start here
@@ -174,7 +174,7 @@ and root-owned secret files may be changed directly on the Pi.
 
 The safe production sequence—including SQLite backup, duplicate-active-row
 preflight, migration inspection, pull, Compose rollout, health checks, and
-rollback—is in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+rollback—is in the [documentation hub](docs/README.md).
 
 The first lifecycle-protocol rollout has a mandatory drained upgrade gate: stop
 checkout, enumerate and physically secure every unrevoked database generation,
@@ -312,7 +312,7 @@ state, outbox, logging, and security-check procedures.
 - [AGENTS.md](AGENTS.md) — binding architecture and security invariants
 - [BUILD_PROMPT.md](BUILD_PROMPT.md) — phased implementation and evidence gates
 - [PROGRESS.md](PROGRESS.md) — current completion status and blockers
-- [docs/OPERATIONS.md](docs/OPERATIONS.md) — deployment and machine operations
-- [docs/E2E-TESTING.md](docs/E2E-TESTING.md) — physical acceptance matrix
+- [docs/operations/README.md](docs/operations/README.md) — deployment and machine operations
+- [docs/README.md](docs/README.md) — documentation hub and operator routing
 - [.env.example](.env.example) — application configuration template
 - [machine-setup/](machine-setup/) — endpoint installer and lifecycle units

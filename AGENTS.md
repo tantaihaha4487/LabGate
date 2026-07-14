@@ -34,8 +34,8 @@ labgate/
 ├── PROGRESS.md
 ├── README.md
 ├── docs/
-│   ├── OPERATIONS.md
-│   └── E2E-TESTING.md
+│   ├── README.md
+│   └── operations/
 ├── docker-compose.yml
 ├── .env.example
 ├── app/
@@ -365,8 +365,7 @@ npx prisma migrate dev
 ```
 
 Production deployment, machine recovery, PAM maintenance, rollback, and physical
-acceptance procedures live in [docs/OPERATIONS.md](docs/OPERATIONS.md) and
-[docs/E2E-TESTING.md](docs/E2E-TESTING.md).
+acceptance procedures live in the routed guides under [docs/README.md](docs/README.md).
 
 <!-- BEGIN:nextjs-agent-rules -->
 # This is NOT the Next.js you know

@@ -1,6 +1,6 @@
 # Install the Raspberry Pi
 
-[Operations index](README.md) · [Full reference](../OPERATIONS.md) · [Back to README](../../README.md)
+[Operations index](README.md) · [Documentation hub](../README.md) · [Back to README](../../README.md)
 
 Install a supported 64-bit Raspberry Pi OS with Git, Docker Engine, the Compose
 plugin, Tailscale, `sqlite3`, and time synchronization. Join the Pi to the same
@@ -31,4 +31,4 @@ chmod 600 secrets/provisioner_key
 chmod 644 secrets/provisioner_key.pub
 ```
 
-Continue with [configuration](configuration.md). See the [full Pi procedure](../OPERATIONS.md#1-install-the-raspberry-pi).
+Continue with [configuration](configuration.md).

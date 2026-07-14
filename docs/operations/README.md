@@ -10,7 +10,9 @@ This directory contains focused operator guides:
 6. [Uninstall or decommission](uninstall.md)
 7. [Remove the Pi application](pi-uninstall.md)
 
-The [full operations reference](../OPERATIONS.md) remains available for exact
-commands, security checks, and recovery edge cases.
+The guides are intentionally small and link to one another so an operator can
+follow only the procedure needed for the current task.
+
+[Documentation hub](../README.md)
 
 [Back to README](../../README.md)

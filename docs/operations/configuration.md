@@ -1,6 +1,6 @@
 # Configure OAuth, HTTPS, and runtime secrets
 
-[Operations index](README.md) · [Full reference](../OPERATIONS.md) · [Back to README](../../README.md)
+[Operations index](README.md) · [Documentation hub](../README.md) · [Back to README](../../README.md)
 
 Create `~/LabGate/.env.local` from `.env.example`, set the required values, and
 protect it with mode `600`. Set the exact HTTPS public origin in
@@ -22,5 +22,5 @@ docker compose logs --tail=200 labgate
 curl --fail --head http://127.0.0.1:3000/login
 ```
 
-See the [configuration reference](../OPERATIONS.md#2-configure-oauth-https-and-runtime-secrets)
-for validation rules and the complete environment-variable table.
+See [AGENTS.md](../../AGENTS.md) for the complete configuration contract and
+security invariants.
