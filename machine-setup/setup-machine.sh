@@ -401,15 +401,16 @@ activate_sshd_policy() {
 }
 
 write_webhook_curl_config() {
-  local temporary token=$1
+  local token=$1 webhook_curl_config
 
   [[ ${token} =~ ^[A-Za-z0-9_-]{32,128}$ ]] || die "invalid webhook token"
-  new_temporary_file temporary
+  new_temporary_file webhook_curl_config
   {
     printf 'header = "Authorization: Bearer %s"\n' "${token}"
     printf 'header = "Content-Type: application/json"\n'
-  } >"${temporary}"
-  install -o root -g root -m 0600 "${temporary}" "${CONFIG_DIRECTORY}/webhook-curl.conf"
+  } >"${webhook_curl_config}"
+  install -o root -g root -m 0600 \
+    "${webhook_curl_config}" "${CONFIG_DIRECTORY}/webhook-curl.conf"
 }
 
 register_machine() {

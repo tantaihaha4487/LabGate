@@ -1424,7 +1424,9 @@ test_static_polkit_policy() {
     /usr/local/lib/labgate/labgate-common.sh || return 1
   grep -Fq 'labgate_validate_api_origin "${api_url}"' "${setup}" || return 1
   grep -Fq 'labgate_validate_registration_secret "${LABGATE_REGISTRATION_SECRET:-}"' \
-    "${setup}"
+    "${setup}" || return 1
+  grep -Fq 'new_temporary_file webhook_curl_config' "${setup}" || return 1
+  ! grep -Fq 'new_temporary_file temporary' "${setup}"
 }
 
 run_case() {

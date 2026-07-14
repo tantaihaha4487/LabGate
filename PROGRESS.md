@@ -138,6 +138,12 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   root-owned LabGate drop-in and keeps effective-policy verification for the
   provisioner. The focused 27-case rootless machine suite, lint, TypeScript,
   shell syntax, and diff checks pass; live installation remains in progress.
+- 2026-07-14 live setup retry reached the late root-only webhook curl-config
+  installation and exposed a Bash dynamic-scope collision between the caller's
+  `temporary` variable and `new_temporary_file`. The reviewed caller now uses a
+  distinct descriptive name with a static regression assertion. The partial
+  run remained fail-secure: boot lock was active and the provisioner shell was
+  enabled only after the forced-command SSH policy passed validation.
 - 2026-07-14 container gate: `labgate:audit-final` built successfully. From a
   blank private bind mount it applied all four migrations, passed database
   postflight, started as UID/GID 1000, created `/app/data` and the database with
