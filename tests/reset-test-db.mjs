@@ -22,6 +22,10 @@ const machineSetupTestPath = resolve(
   projectRoot,
   "tests/machine-setup.test.sh",
 );
+const uninstallScriptTestPath = resolve(
+  projectRoot,
+  "tests/uninstall-scripts.test.sh",
+);
 
 function stop(message) {
   console.error(`Test setup refused to run: ${message}`);
@@ -180,3 +184,8 @@ if (!existsSync(machineSetupTestPath)) {
   stop("tests/machine-setup.test.sh is missing.");
 }
 runCommand("Machine setup test runner", machineSetupTestPath, []);
+
+if (!existsSync(uninstallScriptTestPath)) {
+  stop("tests/uninstall-scripts.test.sh is missing.");
+}
+runCommand("Uninstall script test runner", uninstallScriptTestPath, []);
