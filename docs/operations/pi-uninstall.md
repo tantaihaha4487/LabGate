@@ -8,15 +8,11 @@ for the institution's retention period.
 
 ```sh
 cd ~/LabGate
-sh deploy/save-database.sh
+docker compose stop labgate
+install -d -m 700 backups
+cp --preserve=mode data/labgate.db "backups/labgate-before-remove-$(date +%Y%m%d-%H%M%S).db"
 docker compose down
 ```
-
-`save-database.sh` stops the service, creates a SQLite-native backup under
-`backups/`, sets its mode to `0600`, and verifies both SQLite integrity and
-foreign-key consistency. It leaves the service stopped. If either check fails,
-do not continue with `docker compose down`; preserve the failed backup and
-investigate it first.
 
 Remove the checkout and root-only secrets only after confirming the backup and
 retention decision. Do not use `docker compose down --volumes` unless deleting
