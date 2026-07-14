@@ -1,565 +1,132 @@
 # LabGate
 
-LabGate lets students sign in with an `@ubu.ac.th` Google account, reserve a
-shared physical Ubuntu Desktop lab machine, and receive a temporary password
-for that machine.
+LabGate lets a student authenticate with an `@ubu.ac.th` Google account,
+reserve a shared physical Ubuntu Desktop machine, and receive a temporary
+password for that machine's one pre-existing `guest` account. The password is
+typed at the physical login screen; LabGate is not remote desktop software.
 
-A checkout rotates and unlocks the one pre-existing `guest` OS account. The
-student types the password at the physical machine; LabGate is not a remote
-desktop service. The password is returned once and is never stored by the web
-application. Logout and the credential cleanup timer lock the account, including
-when a reservation expires before the student ever logs in. `/home/guest` is a
-temporary in-memory filesystem that is replaced for every login.
+The web application returns each generated password once and never stores it.
+Every new checkout rotates the shared password for a new credential generation.
+Logout, pending-login expiry, boot recovery, and local safety recovery lock the
+same account rather than creating or deleting student identities.
 
 > [!IMPORTANT]
-> End-to-end validation with real Google credentials and a physical Ubuntu
-> Desktop login screen is still outstanding. Read [PROGRESS.md](PROGRESS.md)
-> before treating the system as production-ready.
+> Physical end-to-end validation is a release gate. Check [PROGRESS.md](PROGRESS.md)
+> and execute [docs/E2E-TESTING.md](docs/E2E-TESTING.md) before treating a machine
+> as ready for students.
 
-## How it fits together
+## Credential lifecycle
+
+`CREDENTIAL_TTL_HOURS` is the time allowed to use a newly issued password at the
+physical login screen. It is not a desktop-session limit.
+
+There is no maximum duration for an active session unless you specify one.
+
+| Machine state | Version | Meaning | Deadline behavior |
+|---|---:|---|---|
+| `pending` | 1 | Password issued; no physical PAM session opened | At the deadline, local cleanup locks it and advances to version 3 |
+| `active` | 2 | Physical PAM open succeeded and a fresh tmpfs home is mounted | Original deadline is ignored; machine stays occupied |
+| `revoked` | 3 | Account lock, process termination, and home unmount completed | Server may release only this exact generation |
+
+The state version is monotonic within one credential ID. A delayed event from an
+older generation cannot close or reopen a newer checkout. A stale heartbeat or
+unreachable host is not evidence that the local account is locked, so the server
+keeps that machine occupied until it receives confirmed safe state.
+
+If the physical endpoint reports an unexpected active or pending generation,
+LabGate terminalizes any conflicting current database row and stores the reported
+ID in `machines.safety_hold_credential_id`. That persistent hold keeps the machine
+occupied even if an unrelated delayed close arrives. Release requires locked
+version 3 for the held ID, or a genuinely locked no-state heartbeat with no
+current database credential.
+
+## Architecture
 
 ```text
-Student browser --HTTPS--> LabGate on Raspberry Pi --SSH over Tailscale--> Lab machine
+Student browser --HTTPS--> Raspberry Pi 5 --SSH over Tailscale--> Physical lab machine
                               ^                                  |
-                              |---- webhooks over Tailscale -----|
+                              |------ versioned webhooks --------|
 ```
 
-- The Raspberry Pi runs Next.js, Better Auth, SQLite, and the provisioning
-  service in Docker Compose.
-- Google OAuth authenticates students. LabGate also checks the email domain on
-  the server; Google's hosted-domain hint is not the only check.
-- The Pi connects as the unprivileged `provisioner` service account and may
-  `sudo` only `/usr/local/sbin/guest-account.sh`.
-- Each machine has exactly one shared interactive account named `guest`.
-- PAM hooks, heartbeat reporting, a local systemd cleanup timer, and a Pi-side
-  cron sweep handle session state and recovery.
-
-## Before you start
-
-You need:
-
-- A Raspberry Pi 5 running a 64-bit Linux distribution, with Docker Engine and
-  the Docker Compose plugin installed.
-- A Tailscale tailnet containing the Pi and every Ubuntu lab machine.
-- A production HTTPS hostname for the student-facing web app, for example
-  `https://labgate.example.ubu.ac.th`.
-- Permission to create a Google OAuth web client for the `ubu.ac.th`
-  organization.
-- Ubuntu Desktop lab machines with a supported display manager (GDM, LightDM,
-  or SDDM), `systemd`, PAM, OpenSSH Server, `curl`, `sudo`, and Tailscale.
-- Administrator access to the Pi and every lab machine.
-
-The commands below use one consistent worked example:
-
-| Placeholder | Example | Meaning |
-|---|---|---|
-| `APP_URL` | `https://labgate.example.ubu.ac.th` | Student-facing HTTPS URL |
-| `PI_TS_IP` | `100.88.10.5` | Pi's Tailscale IPv4 address |
-| `LAB_TS_IP` | `100.93.42.17` | A lab machine's Tailscale IPv4 address |
-| `ADMIN_USER` | `labadmin` | Existing local administrator on a lab machine |
-
-Replace these example values with the addresses and usernames from your own
-tailnet. Do not copy example IPs or secrets literally.
-
-## Production setup on the Raspberry Pi
-
-### 1. Install the prerequisites
-
-Install Git, Docker Engine, the Docker Compose plugin, and Tailscale using their
-official instructions. Join the Pi to the same tailnet as the lab machines,
-then record its address:
-
-```sh
-tailscale ip -4
-docker --version
-docker compose version
-```
-
-Use Tailscale ACLs/grants to allow only:
-
-- the Pi to reach TCP port 22 on the lab machines; and
-- the lab machines to reach the LabGate HTTP port on the Pi.
-
-Do not make lab-machine SSH or webhook traffic publicly reachable.
-
-### 2. Download LabGate and create persistent directories
-
-```sh
-git clone <YOUR_REPOSITORY_URL> LabGate
-cd LabGate
-mkdir -p data secrets
-chmod 700 data secrets
-```
-
-Run all remaining Pi commands from the repository root.
-
-### 3. Generate the provisioning SSH key
-
-Create a dedicated key with no passphrase. The container cannot answer a
-passphrase prompt during checkout.
-
-```sh
-ssh-keygen -t ed25519 -f secrets/provisioner_key -N '' -C labgate-provisioner
-chmod 600 secrets/provisioner_key
-chmod 644 secrets/provisioner_key.pub
-```
-
-Use this key only for LabGate. Do not reuse a personal or administrator key.
-
-### 4. Create the Google OAuth client
-
-In Google Cloud Console:
-
-1. Create or select the institution's Google Cloud project.
-2. Configure the Google Auth Platform branding/consent screen. Select the
-   institution-only audience when the Workspace configuration permits it.
-3. Create a client of type **Web application**.
-4. Add the production authorized redirect URI exactly as:
-
-   ```text
-   APP_URL/api/auth/callback/google
-   ```
-
-   For example:
-
-   ```text
-   https://labgate.example.ubu.ac.th/api/auth/callback/google
-   ```
-
-5. Save the generated client ID and client secret.
-
-The scheme, hostname, port, path, case, and trailing slash must match. Google
-normally requires HTTPS for non-localhost redirect URIs. See Google's
-[web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server)
-and [OpenID Connect guide](https://developers.google.com/identity/openid-connect/openid-connect).
-
-### 5. Configure environment variables
-
-Copy the template and restrict access:
-
-```sh
-cp .env.example .env.local
-chmod 600 .env.local
-```
-
-Generate three independent secrets. Run the command separately for
-`BETTER_AUTH_SECRET`, `MACHINE_REGISTRATION_SECRET`, and `CRON_SECRET`:
-
-```sh
-openssl rand -base64 32
-```
-
-Edit `.env.local`:
-
-```dotenv
-BETTER_AUTH_URL=https://labgate.example.ubu.ac.th
-BETTER_AUTH_SECRET=<GENERATED_SECRET_1>
-GOOGLE_CLIENT_ID=<GOOGLE_WEB_CLIENT_ID>
-GOOGLE_CLIENT_SECRET=<GOOGLE_WEB_CLIENT_SECRET>
-ALLOWED_EMAIL_DOMAIN=ubu.ac.th
-DATABASE_URL=file:./data/labgate.db
-PROVISIONER_SSH_KEY_PATH=/run/secrets/provisioner_key
-CREDENTIAL_TTL_HOURS=0.05
-GUEST_PASSWORD_LENGTH=8
-MACHINE_REGISTRATION_SECRET=<GENERATED_SECRET_2>
-CRON_SECRET=<GENERATED_SECRET_3>
-```
-
-Notes:
-
-- `BETTER_AUTH_URL` must be the same origin students open and the origin used
-  in the Google redirect URI.
-- Keep `DATABASE_URL` and `PROVISIONER_SSH_KEY_PATH` at their shown container
-  paths for the supplied Compose deployment.
-- `CREDENTIAL_TTL_HOURS` defaults to three minutes (`0.05` hours). Use the
-  matching value `180` for `LABGATE_MAX_TTL_SECONDS` on each lab machine.
-- `GUEST_PASSWORD_LENGTH` defaults to `8`; administrators may set a whole-number
-  length from 8 through 128. The generated value always uses the shell-safe,
-  unambiguous character set from `AGENTS.md`.
-- Never commit `.env.local`, `data/`, or `secrets/`.
-
-### 6. Start the application
-
-```sh
-docker compose up --build -d
-docker compose ps
-docker compose logs --tail=100 labgate
-```
-
-The container runs `prisma migrate deploy` on every start. Do not run the
-development seed in production: it adds a fake lab machine.
-
-At this point, verify the app locally on the Pi:
-
-```sh
-curl --fail --head http://127.0.0.1:3000/login
-```
-
-### 7. Publish the student-facing HTTPS URL
-
-Put an HTTPS reverse proxy in front of `127.0.0.1:3000` and point `APP_URL` at
-it. Configure the host firewall so port 3000 is not reachable from the public
-internet; only the reverse proxy and the tailnet should reach it.
-
-The reverse proxy must preserve the original `Host` and forwarded-protocol
-headers. After it is configured, verify:
-
-```sh
-curl --fail --head https://labgate.example.ubu.ac.th/login
-```
-
-For a tailnet-only pilot, Tailscale Serve can provide an HTTPS reverse proxy:
-
-```sh
-sudo tailscale serve --bg 3000
-tailscale serve status
-```
-
-Use the resulting `https://...ts.net` URL as `BETTER_AUTH_URL` and in Google
-OAuth. This option is private to tailnet members, so it is usually unsuitable
-for student devices that are not enrolled in Tailscale. See the
-[Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve).
-
-### 8. Install the Pi-side recovery sweep
-
-For a healthy machine, the sweep locks an expired guest password over SSH before
-releasing the reservation. If a machine stops reporting activity, it applies the
-database recovery fallback while the machine's persistent local timer enforces
-the account lock. Install the example in root's crontab and replace the
-placeholder with the exact `CRON_SECRET` value from `.env.local`:
-
-```sh
-sudo crontab -e
-```
-
-Add:
-
-```cron
-* * * * * curl --fail --silent --show-error --max-time 20 --request POST --header "Authorization: Bearer REPLACE_WITH_CRON_SECRET" http://127.0.0.1:3000/api/cron/sweep >/dev/null
-```
-
-Test it without printing the secret to application logs:
-
-```sh
-curl --fail --request POST \
-  --header "Authorization: Bearer $CRON_SECRET" \
-  http://127.0.0.1:3000/api/cron/sweep
-```
-
-If the variable is not already in your shell, read it into a temporary shell
-variable without adding it to history:
-
-```sh
-read -rsp 'CRON_SECRET: ' CRON_SECRET
-export CRON_SECRET
-```
-
-Unset it after the test:
-
-```sh
-unset CRON_SECRET
-```
-
-## Enroll each Ubuntu lab machine
-
-Repeat this section for every physical lab machine. Do not create student OS
-accounts. `setup-machine.sh` creates the single `guest` account only during
-initial setup and then only rotates or locks its password.
-
-### 1. Install and verify machine prerequisites
-
-On the lab machine:
-
-```sh
-sudo apt update
-sudo apt install --yes curl openssh-server sudo
-sudo systemctl enable --now ssh
-```
-
-Install Tailscale using its official instructions, join the same tailnet as the
-Pi, and verify both directions. This worked example consistently uses
-`100.88.10.5` for the Pi and `100.93.42.17` for the Ubuntu lab machine.
-
-```sh
-tailscale ip -4
-tailscale ping 100.88.10.5
-```
-
-On the Pi, verify the lab machine is reachable:
-
-```sh
-tailscale ping 100.93.42.17
-```
-
-The remaining examples assume the machine has an existing administrator named
-`labadmin`. Replace that username with the real local administrator account.
-
-### 2. Copy the setup files to the lab machine
-
-The lab machine needs the complete `machine-setup/` directory and the
-provisioning **public** key. Choose one of the following methods based on the
-computer from which you are working.
-
-Never copy `secrets/provisioner_key` (the private key) away from the Pi. Only
-copy `secrets/provisioner_key.pub`.
-
-#### Option A: Copy directly from the Raspberry Pi
-
-Run these commands from the LabGate repository on the Pi:
-
-```sh
-cd ~/LabGate
-scp secrets/provisioner_key.pub labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
-scp -r machine-setup labadmin@100.93.42.17:/tmp/labgate-machine-setup
-```
-
-Each `scp` command above is one line. If you split a shell command with `\`,
-the backslash must be the final character on that line with no spaces after it;
-otherwise `scp` may report `stat local " ": No such file or directory` even
-after the intended file was copied.
-
-If your prompt looks like `user@raspberrypi:~/LabGate$`, stop here: Option A is
-the correct path. Do not run the `/tmp/labgate-provisioner.pub` relay commands
-from Option B on the Pi. Also replace `labadmin` with the real administrator
-username on the destination; for example, use `mashiro@...` if that is the
-account that exists there.
-
-#### Option B: Copy from another Linux or macOS computer
-
-Install Git and the OpenSSH client on the operator computer. Clone the public
-repository, fetch the public key from the Pi, and forward both items to the lab
-machine. This example assumes the Pi user is `piadmin` and the repository was
-cloned as `/home/piadmin/LabGate`. Replace both when your Pi username or clone
-location differs. Use this relay only when the current computer is not the Pi:
-
-```sh
-git clone https://github.com/tantaihaha4487/LabGate.git
-cd LabGate
-scp piadmin@100.88.10.5:/home/piadmin/LabGate/secrets/provisioner_key.pub /tmp/labgate-provisioner.pub
-scp /tmp/labgate-provisioner.pub labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
-scp -r machine-setup labadmin@100.93.42.17:/tmp/labgate-machine-setup
-```
-
-Delete the temporary public-key copy when finished:
-
-```sh
-rm -f /tmp/labgate-provisioner.pub
-```
-
-#### Option C: Copy from Windows PowerShell
-
-Windows is supported as the operator computer used to copy files. Install Git
-and the Windows OpenSSH Client first, then open PowerShell:
-
-```powershell
-git clone https://github.com/tantaihaha4487/LabGate.git
-Set-Location LabGate
-scp.exe piadmin@100.88.10.5:/home/piadmin/LabGate/secrets/provisioner_key.pub .\labgate-provisioner.pub
-scp.exe .\labgate-provisioner.pub labadmin@100.93.42.17:/tmp/labgate-provisioner.pub
-scp.exe -r .\machine-setup labadmin@100.93.42.17:/tmp/labgate-machine-setup
-Remove-Item .\labgate-provisioner.pub
-```
-
-The destination lab machine itself must be Ubuntu Desktop. A Windows machine
-cannot be enrolled as a LabGate endpoint because the machine-side security
-model requires PAM, `systemd`, tmpfs, `passwd`, and Linux sudoers. Windows may
-only be used as the administrator/operator computer in this workflow.
-
-Confirm that all files arrived, from any operator computer with SSH:
-
-```sh
-ssh labadmin@100.93.42.17 \
-  'find /tmp/labgate-machine-setup -maxdepth 1 -type f -print'
-```
-
-Expected files include `setup-machine.sh`, `guest-account.sh`, the PAM session
-hook, cleanup and heartbeat scripts, systemd units, and the sudoers file. Copy
-the whole directory; `setup-machine.sh` reads those neighboring files during
-installation.
-
-### 3. Create the provisioning service identity
-
-The installer intentionally requires an existing `provisioner` account. This
-account is infrastructure, not a student or guest account.
-
-Connect to the destination machine:
-
-```sh
-ssh labadmin@100.93.42.17
-```
-
-On the lab machine, create the service account and install the copied public
-key:
-
-```sh
-sudo test -s /tmp/labgate-provisioner.pub
-sudo install -d -o root -g root -m 0755 /etc/sysusers.d
-sudo tee /etc/sysusers.d/labgate-provisioner.conf >/dev/null <<'EOF'
-u provisioner - "LabGate SSH provisioner" /var/lib/labgate-provisioner /bin/bash
-EOF
-sudo systemd-sysusers /etc/sysusers.d/labgate-provisioner.conf
-getent passwd provisioner
-sudo install -d -o provisioner -g provisioner -m 0700 \
-  /var/lib/labgate-provisioner/.ssh
-sudo install -o provisioner -g provisioner -m 0600 \
-  /tmp/labgate-provisioner.pub \
-  /var/lib/labgate-provisioner/.ssh/authorized_keys
-sudo test -s /var/lib/labgate-provisioner/.ssh/authorized_keys
-```
-
-Stop at the first reported error. Delete the temporary public key only after
-all commands above succeed:
-
-```sh
-sudo rm -f /tmp/labgate-provisioner.pub
-```
-
-Confirm `/etc/ssh/sshd_config` allows public-key authentication, then reload
-SSH if you changed it:
-
-```sh
-sudo sshd -t
-sudo systemctl reload ssh
-```
-
-### 4. Run the machine installer
-
-On the lab machine, start an explicit root Bash shell. Do this as a separate
-step and wait for the root prompt before continuing:
-
-```sh
-sudo bash
-```
-
-Using `sudo -i` is not recommended here because it may start Zsh or another
-root login shell where Bash's `read -p` option has different behavior.
-
-At the root Bash prompt, run the following command without putting the secret
-inside it:
-
-```sh
-read -rsp 'Machine registration secret: ' LABGATE_REGISTRATION_SECRET
-```
-
-When `Machine registration secret:` appears, paste the secret and press Enter.
-The pasted value is intentionally invisible. Then configure and run the
-installer:
-
-```sh
-printf '\n'
-export LABGATE_REGISTRATION_SECRET
-export LABGATE_API_URL='http://100.88.10.5:3000'
-export LABGATE_MACHINE_NAME='Lab A - PC 01'
-export LABGATE_MAX_TTL_SECONDS='180'
-bash /tmp/labgate-machine-setup/setup-machine.sh
-```
-
-A successful run ends with:
-
-```text
-LabGate machine setup complete for Lab A - PC 01 (100.93.42.17).
-```
-
-Clear the registration secret and leave the root Bash shell:
-
-```sh
-unset LABGATE_REGISTRATION_SECRET
-exit
-```
-
-In this worked example, `100.88.10.5` is always the Pi and
-`100.93.42.17` is always the destination Ubuntu lab machine.
-
-`LABGATE_API_URL` should use the Pi's Tailscale address or tailnet-only DNS
-name—not the public student URL. If the machine has not joined Tailscale yet,
-you may also supply `TAILSCALE_AUTH_KEY`; prefer a tagged, reusable or ephemeral
-key with the narrowest practical permissions, and unset it immediately.
-
-The installer automatically chooses one of these PAM files:
-
-- `/etc/pam.d/gdm-password`
-- `/etc/pam.d/lightdm`
-- `/etc/pam.d/sddm`
-
-For another display manager, set `LABGATE_PAM_FILE` to its session PAM file only
-after reviewing that display manager's PAM flow.
-
-The installer is idempotent. Rerunning it updates scripts, sudoers, PAM, and
-systemd units without creating another guest account. It preserves the existing
-per-machine webhook token. The cleanup timer locks expired credentials locally
-before notifying LabGate, and retries that notification if the Pi is temporarily
-unreachable.
-
-### 5. Verify the machine installation
-
-On the lab machine:
-
-```sh
-getent passwd guest provisioner
-sudo passwd --status guest
-sudo visudo -cf /etc/sudoers.d/labgate-guest-provision
-sudo systemctl status guest-cleanup.timer guest-heartbeat.timer
-sudo journalctl -u guest-heartbeat.service --since '10 minutes ago'
-sudo test -s /etc/labgate/webhook-token
-sudo test "$(stat -c %a /etc/labgate/webhook-token)" = 600
-```
-
-On the Pi, test the exact SSH path used by the app:
-
-```sh
-ssh -i secrets/provisioner_key \
-  -o IdentitiesOnly=yes \
-  provisioner@100.93.42.17 \
-  'sudo /usr/local/sbin/guest-account.sh revoke'
-```
-
-The command should succeed without a password prompt. Do not test `issue` with
-a real student present; it changes the current guest password.
-
-## End-to-end acceptance test
-
-Complete this test on a non-production machine before rollout:
-
-1. Open the production app URL and sign in with a valid `@ubu.ac.th` account.
-2. Confirm a non-`@ubu.ac.th` account cannot establish a session.
-3. Confirm the enrolled machine appears as available.
-4. Check out the machine and record the one-time password.
-5. At the physical Ubuntu login screen, sign in as `guest` with that password.
-6. Create a harmless file in `/home/guest`, then log out.
-7. Confirm the guest account is locked and the machine becomes available again.
-8. Check out and log in again; confirm the file from the prior session is gone
-   and `/home/guest` is a fresh tmpfs mount.
-9. Test expiration during an open guest session by using a short TTL on a test
-   machine. Confirm the local cleanup timer locks the account even if webhooks
-   are unavailable.
-10. Test expiration without ever logging in. Confirm the credential page counts
-    down to `00:00`, hides the password, the local cleanup timer locks the issued
-    password, and LabGate returns the machine to the available state.
-11. Simulate a powered-off or disconnected machine and confirm the Pi cron
-    sweep eventually revokes the expired credential and releases the machine.
-12. Review the Pi and lab-machine logs for errors.
-
-Do not check off Phase 8 in [PROGRESS.md](PROGRESS.md) until the real physical
-login, fresh-home, logout, and failure-recovery tests pass.
+- The Pi runs Next.js, Better Auth, SQLite/Prisma, and the provisioning service
+  with Docker Compose.
+- Google supplies authentication and LabGate independently checks the server-side
+  email suffix.
+- Provisioning uses `node-ssh` with explicit timeouts and a dedicated key.
+- Every connection is pinned to the endpoint's canonical Ed25519 SHA256 host-key
+  fingerprint; Tailscale reachability is not treated as host authentication.
+- The machine's `provisioner` SSH identity is forced through a strict dispatcher;
+  it uses `/bin/sh` only as the forced-command launcher, authenticates by public
+  key only, and is not a general-purpose shell. Its home is root-owned; only its
+  `.ssh` child and key file are provisioner-owned.
+- The physical `guest` identity is denied SSH access.
+- PAM performs local state changes only. It writes versioned events to a
+  root-controlled persistent outbox, and a separate timer retries delivery.
+- Outbox filenames use a durable fixed-width monotonic sequence, not timestamps.
+  Producers take only a short local sequence lock, so a blocked webhook request
+  can never delay PAM or another local event publication.
+- Valid authenticated lifecycle events are transport-acknowledged after their
+  transactional state decision even when that decision is held/conflict/not-found,
+  so an ordered outbox cannot strand a later exact close behind an old event.
+- Cleanup, heartbeat, webhook-flush, and boot-lock systemd units provide
+  independent reconciliation and fail-safe recovery.
+
+## Required configuration
+
+Copy `.env.example` to `.env.local` and keep the result out of source control.
+
+| Variable | Purpose |
+|---|---|
+| `BETTER_AUTH_URL` | Exact public application origin used by Google OAuth |
+| `BETTER_AUTH_SECRET` | Better Auth signing secret |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth web client |
+| `ALLOWED_EMAIL_DOMAIN` | Server-enforced institution suffix; default `ubu.ac.th` |
+| `DATABASE_URL` | SQLite path; Compose uses `file:./data/labgate.db` |
+| `PROVISIONER_SSH_KEY_PATH` | Absolute readable non-empty regular mode-`0600` private-key path; Compose uses `/run/secrets/provisioner_key` |
+| `CREDENTIAL_TTL_HOURS` | Pending physical-login deadline, from one minute through 24 hours |
+| `GUEST_PASSWORD_LENGTH` | Exact generated length, whole number from 8 through 128 |
+| `MACHINE_REGISTRATION_SECRET` | Authenticates first machine registration |
+| `CRON_SECRET` | Authenticates the Pi recovery sweep |
+
+`GUEST_PASSWORD_LENGTH` has no silent deployment fallback when a malformed value
+is supplied. A configured value of `8` always generates exactly eight characters.
+Every machine must be installed with the identical `LABGATE_PASSWORD_LENGTH`,
+which is persisted in root-only `/etc/labgate/password-length` and independently
+enforced before password rotation.
+
+The machine also rejects an issued pending deadline more than 24 hours plus a
+fixed 60-second NTP clock-skew allowance into its future. This is an independent
+upper bound on the login window, not an active-session duration limit.
+
+`MACHINE_REGISTRATION_SECRET` and `CRON_SECRET` accept 20–256-character RFC 6750
+`b64token` values. Standard Base64 `+`, `/`, and trailing `=` padding are valid,
+as are URL-safe tokens; whitespace and quoting are not. Existing URL-safe Pi
+secrets remain valid, so this compatibility expansion alone requires no rotation.
+
+Per-machine webhook tokens are generated at registration. They live in the
+database and root-only machine files, not `.env.local`.
 
 ## Local development
 
-Local development requires Node.js 22+, npm, and Google OAuth credentials with
-this additional authorized redirect URI:
+Requirements: Node.js 22 or newer, npm, SQLite-compatible Prisma dependencies,
+and a Google OAuth client whose redirect list includes:
 
 ```text
 http://localhost:3000/api/auth/callback/google
 ```
 
-Set up the project:
+Setup:
 
 ```sh
 npm install
 mkdir -p data secrets
 cp .env.example .env.local
+npx prisma generate
+npx prisma migrate dev
+npm run dev
 ```
 
-For local execution outside Docker, change these values in `.env.local`:
+For a local process rather than Compose, use local filesystem paths:
 
 ```dotenv
 BETTER_AUTH_URL=http://localhost:3000
@@ -567,20 +134,7 @@ DATABASE_URL=file:./data/labgate.db
 PROVISIONER_SSH_KEY_PATH=./secrets/provisioner_key
 ```
 
-Fill every blank secret and Google credential, then initialize and run:
-
-```sh
-npx prisma generate
-npx prisma migrate dev
-npx prisma db seed
-npm run dev
-```
-
-Open <http://localhost:3000>. The seed creates a fake machine at `100.64.0.10`;
-listing works, but checkout requires a reachable test machine with the
-provisioning key installed.
-
-Before committing changes:
+Before committing:
 
 ```sh
 npm test
@@ -588,132 +142,160 @@ npm run lint
 npm run build
 ```
 
-## Operations
+## Raspberry Pi deployment rule
 
-### Back up SQLite
+The production clone is `~/LabGate` on:
 
-The database contains user, session, machine-token, credential metadata, and
-audit records, but never guest passwords. Stop writes before copying it:
-
-```sh
-docker compose stop labgate
-cp data/labgate.db "data/labgate.db.backup-$(date +%Y%m%d-%H%M%S)"
-docker compose start labgate
+```text
+labgate-1@raspberrypi.tailfdedcf.ts.net
 ```
 
-Store backups encrypted with access limited to administrators. Test restoration
-on a separate host periodically.
+Tracked project files must never be edited ad hoc on the Pi. Make the change on
+the development machine, validate it, commit it, push it, and only then update
+the Pi with a fast-forward pull. Runtime-only configuration such as `.env.local`
+and root-owned secret files may be changed directly on the Pi.
 
-### Update LabGate
+The safe production sequence—including SQLite backup, duplicate-active-row
+preflight, migration inspection, pull, Compose rollout, health checks, and
+rollback—is in [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
-Back up the database first, review release and migration changes, then:
+The first lifecycle-protocol rollout has a mandatory drained upgrade gate: stop
+checkout, enumerate and physically secure every unrevoked database generation,
+transactionally mark only verified rows revoked, install the new machine
+protocol, prove dormant-safe null-or-revoked state, and only then migrate/start
+the Pi and reopen checkout. This gate also checks that machine names and Tailscale
+addresses uniquely identify one physical endpoint.
 
-```sh
-git pull --ff-only
-docker compose up --build -d
-docker compose logs --tail=100 labgate
-```
+Startup also fails closed for non-canonical/duplicate endpoint identities or SSH
+host-key pins and an
+`available` machine that still has a current credential or safety hold. An
+`occupied` machine with no current credential remains quarantined and produces an operator warning;
+it is not silently released. Registration `POST` binds the exact name, canonical
+Tailscale address, and Ed25519 host-key pin and cannot rename, move, merge, or
+rekey an existing identity. A new enrollment begins offline with a null heartbeat;
+an exact POST replay returns the stable token without mutating state, and only a
+strict authenticated locked/session-free heartbeat can make it available. A separate authenticated `PATCH` supports reviewed
+drained rekey only when the machine is available with no current credential and
+no safety hold; it rotates the token and holds the replacement identity offline
+until a safe locked, session-free heartbeat arrives.
 
-Copy the updated `machine-setup/` directory to each lab machine and rerun
-`setup-machine.sh` when machine-side files change.
+## Machine enrollment and updates
 
-### Rotate secrets
+Each Ubuntu Desktop endpoint requires:
 
-- Rotate the Google client secret in Google Cloud, update `.env.local`, and
-  restart the container.
-- Rotating `BETTER_AUTH_SECRET` invalidates existing sessions.
-- After rotating `CRON_SECRET`, update root's crontab immediately.
-- After rotating `MACHINE_REGISTRATION_SECRET`, use the new value only for new
-  or deliberately re-enrolled machines.
-- To rotate the provisioning SSH key, install the new public key on every
-  machine before replacing `secrets/provisioner_key` and restarting LabGate.
+- Tailscale connectivity to the Pi;
+- OpenSSH Server, PAM, Polkit, systemd, `curl`, `sudo`, `keyctl`, and the
+  util-linux IPC tools;
+- one existing administrator identity and the dedicated infrastructure
+  `provisioner` identity initially using verified `nologin`, a root-owned home,
+  and no authorized key;
+- the provisioning public key; and
+- the complete committed `machine-setup/` directory.
 
-### Logs and health checks
+`setup-machine.sh` installs or updates scripts, root-only configuration, PAM and
+Polkit policy, SSH policy, sudoers policy, and systemd units idempotently. It terminates
+old provisioner processes, validates the forced dispatcher and sudoers, and only
+then changes the service shell to `/bin/sh`; its shadow password remains locked
+and physical PAM account paths deny it. Install `authorized_keys` after setup
+completes. Initial registration reads `LABGATE_REGISTRATION_SECRET`; normal updates
+preserve the existing per-machine token only when the root-only persisted Ed25519
+host-key pin matches the live key. A legacy token without that marker or a changed
+key requires the explicit drained rekey procedure. Never copy the Pi's provisioning private
+key to a lab machine.
 
-```sh
-docker compose ps
-docker compose logs --since=30m labgate
-sudo journalctl -u guest-heartbeat.service -u guest-cleanup.service --since today
-tailscale status
-```
+`LABGATE_API_URL` is an origin, not a general URL: for example,
+`http://100.64.0.5:3000` or `https://raspberrypi.example.ts.net`. Userinfo, a
+trailing slash/path, query, fragment, non-canonical host text, and invalid ports
+fail setup. When no valid existing token/pin pair is present, the registration
+secret is validated before setup can mutate account, PAM, or SSH policy and is
+validated again immediately before registration.
 
-Treat logs and the database as sensitive: audit entries include student email
-addresses.
+An endpoint with the old clock-named outbox format is an explicit drained
+maintenance migration. Setup refuses it by default. After boot-lock recovery has
+proved the guest locked with no session, process, or mount, rerun with
+`LABGATE_MIGRATE_LEGACY_OUTBOX=1`; setup journals every affected credential,
+queues authoritative version-3 terminal reports, and preserves the old files in
+a root-only archive. See the operations runbook before using this flag.
 
-## Troubleshooting
+Only the supported GDM, LightDM, or SDDM password PAM stack may be selected. Setup
+rejects a selected auth graph containing `pam_fprintd.so`, denies known alternate
+display-manager paths to `guest`, and fails on unknown matching paths for manual
+review. It also denies non-root guest self-service through `passwd`, `chsh`, and
+`chfn` while retaining explicit root maintenance. The selected auth graph is
+checked for `pam_faillock`, `pam_tally2`, and `pam_tally`; every issue resets all
+detected counters and enforces non-expiring guest password aging before unlock.
 
-### Google reports `redirect_uri_mismatch`
+The exact committed Polkit rule denies every privileged broker action when the
+subject user is `guest`; it has no rule for root, administrators, or `provisioner`.
+This is an intentional compatibility boundary: the shared guest loses all
+privileged desktop broker actions, so administrators must perform system changes
+from their own identity. Every local secure flow also disables guest linger and
+must remove `/var/lib/systemd/linger/guest` before process cleanup.
+Setup also validates the complete sudoers policy and accepts enrollment only when
+sudo's resolved policy proves `guest` has no command grant; it does not trust a
+deny line that a different sudoers rule could override.
 
-Check that `BETTER_AUTH_URL` plus `/api/auth/callback/google` exactly matches an
-authorized redirect URI in Google Cloud. Restart the container after changing
-`.env.local`.
+Local revocation is broader than the tmpfs home: after terminating guest-owned
+processes it clears the exact `/run/user/<guest UID>` tree, guest-owned POSIX
+mqueues, guest-created/owned System V IPC, the guest persistent keyring, exact
+guest mailbox paths, and guest-owned entries on `/tmp`, `/var/tmp`, and `/dev/shm`.
+PAM open recreates the runtime directory empty at mode 0700. The cleanup is
+intentionally bounded; administrators must not grant the shared account other
+persistent writable locations and must not replace it with a filesystem-wide scan.
 
-### A valid student receives a domain error
+Use [docs/OPERATIONS.md](docs/OPERATIONS.md#machine-installation-and-update) for
+the exact installation, update, PAM inspection/reset/disable, recovery, timer,
+state, outbox, logging, and security-check procedures.
 
-Confirm `ALLOWED_EMAIL_DOMAIN=ubu.ac.th` without whitespace or a misspelling.
-LabGate intentionally checks the email suffix on the server in addition to
-Google's hosted-domain setting.
+## Safety model
 
-### Checkout fails or the machine remains unavailable
+- Exactly one shared physical-desktop account exists on each endpoint.
+- The web database and persistent machine state never contain the generated
+  guest password.
+- Passwords use only the unambiguous alphanumeric set and exactly the configured
+  length.
+- An issue password is sent as one newline-terminated SSH stdin line, never in
+  `SSH_ORIGINAL_COMMAND`, sudo argv, process listings, or logs.
+- Credential IDs and state versions scope every issue, revoke, webhook, and
+  recovery action to one generation.
+- A persistent server-side safety hold records either one exact unexpected
+  physical generation or a reserved conflict sentinel when multiple generations
+  are implicated. Unrelated closes cannot release it; only a fresh globally safe
+  heartbeat can clear a conflict, and checkout/rekey require the hold to be null.
+- Root-controlled tombstones prevent a terminal generation ID—including one
+  compensated before pending state existed—from ever being issued later.
+- PAM open remounts `/home/guest` as a new verified tmpfs; PAM close locks first,
+  terminates guest-owned processes, and performs a verified non-lazy unmount.
+- Secure close/recovery clears the bounded runtime, scratch, IPC, keyring, and
+  mailbox surfaces; failure to prove any one clear keeps the endpoint unsafe.
+- Local safety does not depend on the Pi or network. Webhook retry does not run
+  in the PAM transaction.
+- Boot lock runs before display-manager and SSH login services.
+- A guest-only universal Polkit denial blocks privileged desktop broker paths;
+  secure close/recovery removes and verifies the guest linger marker before
+  terminating processes. Root, administrator, and provisioner policy is unchanged.
+- A release-capable no-state heartbeat is emitted only after that full secure
+  transaction and PAM-marker cleanup succeeds. Corrupt state is secured locally
+  but withheld from no-state reconciliation.
+- Root-owned PAM guards prevent the non-root shared guest from persistently
+  changing its password, login shell, or GECOS data while retaining explicit
+  root maintenance.
+- Machines remain occupied whenever server state cannot prove a confirmed lock
+  and inactive session.
+- Bearer values belong in permission-restricted files, never command arguments,
+  crontab text, logs, screenshots, or tickets.
+- Provisioner SSH is public-key-only, rejects user environment/startup files and
+  non-locale `AcceptEnv`, and invokes only fixed `/usr/bin/sudo` through the
+  validated dispatcher. Its password is locked and physical PAM paths deny it.
+- The Pi verifies the exact registered Ed25519 host-key SHA256 pin before any
+  provisioning command; setup will not silently enroll a legacy null pin.
 
-Verify, in order:
+## Documentation
 
-1. `tailscale ping 100.93.42.17` works from the Pi.
-2. TCP port 22 is allowed from the Pi to the machine.
-3. The private key is mounted at `/run/secrets/provisioner_key` in the container.
-4. The `provisioner` account owns its `authorized_keys` file.
-5. The SSH test in the enrollment section succeeds without interaction.
-6. `/etc/sudoers.d/labgate-guest-provision` passes `visudo -cf`.
-
-Then inspect `docker compose logs labgate` and the machine's SSH journal.
-
-### The machine does not appear after setup
-
-Check the heartbeat timer and confirm the machine can reach
-`http://100.88.10.5:3000`. If the Pi database was replaced but the machine still
-has `/etc/labgate/webhook-token`, the token no longer matches a database row.
-Deliberate re-enrollment requires removing that file, rerunning the installer
-with `LABGATE_REGISTRATION_SECRET`, and protecting the newly issued token.
-
-### Setup cannot find a PAM file
-
-Identify the display manager's session PAM file and rerun with
-`LABGATE_PAM_FILE=/etc/pam.d/<file>`. Do not guess: an incorrect PAM file can
-leave cleanup hooks inactive or interfere with login.
-
-### Guest data persists after logout
-
-Remove the machine from student use immediately. Check that the PAM hook exists
-in the selected display-manager file, inspect `guest-cleanup.service`, and
-verify `/home/guest` is mounted as tmpfs during a session. This is a security
-failure, not a cosmetic issue.
-
-## Security and deployment recommendations
-
-- Keep the app, Pi, and lab machines patched; pin and review dependency updates.
-- Restrict the student web app to HTTPS and apply rate limiting at the reverse
-  proxy, especially to auth and API routes.
-- Use Tailscale ACLs/grants and host firewalls for least-privilege connectivity.
-- Never expose SSH on lab machines to the public internet.
-- Keep `.env.local`, the provisioning key, webhook tokens, SQLite backups, and
-  audit logs out of source control and administrator chat systems.
-- Use a dedicated tagged Tailscale identity for the Pi and lab machines rather
-  than personal device identities.
-- Monitor disk space, container restarts, failed provisioning, stale
-  heartbeats, and timer failures.
-- Keep the local systemd cleanup timer and Pi cron sweep enabled; they cover
-  different failure modes.
-- Perform the full acceptance test after changes to auth, checkout,
-  provisioning, PAM, sudoers, timers, or networking.
-- Document a lab shutdown procedure and an incident process for a guest session
-  that fails to lock or clear.
-
-## Project references
-
-- [AGENTS.md](AGENTS.md) — architecture, conventions, and security invariants
-- [BUILD_PROMPT.md](BUILD_PROMPT.md) — phased implementation and acceptance plan
-- [PROGRESS.md](PROGRESS.md) — current implementation and validation status
-- [`.env.example`](.env.example) — required application configuration
-- [`machine-setup/`](machine-setup/) — lab-machine installer and security hooks
-- [`deploy/labgate-sweep.cron.example`](deploy/labgate-sweep.cron.example) — Pi
-  recovery sweep template
+- [AGENTS.md](AGENTS.md) — binding architecture and security invariants
+- [BUILD_PROMPT.md](BUILD_PROMPT.md) — phased implementation and evidence gates
+- [PROGRESS.md](PROGRESS.md) — current completion status and blockers
+- [docs/OPERATIONS.md](docs/OPERATIONS.md) — deployment and machine operations
+- [docs/E2E-TESTING.md](docs/E2E-TESTING.md) — physical acceptance matrix
+- [.env.example](.env.example) — application configuration template
+- [machine-setup/](machine-setup/) — endpoint installer and lifecycle units

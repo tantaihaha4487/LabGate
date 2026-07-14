@@ -4,12 +4,13 @@ import {
   type ProvisionTarget,
 } from "@/lib/provision";
 
-const RECENT_HEARTBEAT_WINDOW_MS = 2 * 60 * 1000;
-
-type RevokeFunction = (machine: ProvisionTarget) => Promise<void>;
+type RevokeFunction = (
+  machine: ProvisionTarget,
+  credentialId: string,
+) => Promise<void>;
 
 export interface CredentialExpiryResult {
-  status: "released" | "already_released" | "retry";
+  status: "released" | "held" | "already_released" | "active" | "retry";
   releasedMachine: boolean;
 }
 
@@ -25,13 +26,6 @@ interface FinalizeCredentialOptions {
   detail: string;
 }
 
-function hasRecentHeartbeat(lastHeartbeat: Date | null, now: Date): boolean {
-  return (
-    lastHeartbeat !== null &&
-    lastHeartbeat.getTime() >= now.getTime() - RECENT_HEARTBEAT_WINDOW_MS
-  );
-}
-
 export async function finalizeExpiredCredential({
   credentialId,
   now,
@@ -43,14 +37,34 @@ export async function finalizeExpiredCredential({
         id: credentialId,
         revokedAt: null,
         expiresAt: { lte: now },
+        sessionOpenedAt: null,
       },
       select: {
+        machine: {
+          select: {
+            safetyHoldCredentialId: true,
+            sshHostKeySha256: true,
+          },
+        },
         machineId: true,
         studentEmail: true,
       },
     });
 
     if (!credential) {
+      const activeCredential = await transaction.guestCredential.findFirst({
+        where: {
+          id: credentialId,
+          revokedAt: null,
+          sessionOpenedAt: { not: null },
+        },
+        select: { id: true },
+      });
+
+      if (activeCredential) {
+        return { status: "active", releasedMachine: false };
+      }
+
       return { status: "already_released", releasedMachine: false };
     }
 
@@ -59,8 +73,9 @@ export async function finalizeExpiredCredential({
         id: credentialId,
         revokedAt: null,
         expiresAt: { lte: now },
+        sessionOpenedAt: null,
       },
-      data: { revokedAt: now },
+      data: { revokedAt: now, machineStateVersion: 3 },
     });
 
     if (revoked.count !== 1) {
@@ -78,10 +93,30 @@ export async function finalizeExpiredCredential({
 
     if (!anotherCredential) {
       const released = await transaction.machine.updateMany({
-        where: { id: credential.machineId },
-        data: { status: "available" },
+        where: {
+          id: credential.machineId,
+          sshHostKeySha256: { not: null },
+          OR: [
+            { safetyHoldCredentialId: null },
+            { safetyHoldCredentialId: credentialId },
+          ],
+        },
+        data: { status: "available", safetyHoldCredentialId: null },
       });
       releasedMachine = released.count === 1;
+      if (!releasedMachine && credential.machine.sshHostKeySha256 === null) {
+        await transaction.machine.updateMany({
+          where: {
+            id: credential.machineId,
+            sshHostKeySha256: null,
+            OR: [
+              { safetyHoldCredentialId: null },
+              { safetyHoldCredentialId: credentialId },
+            ],
+          },
+          data: { status: "offline", safetyHoldCredentialId: null },
+        });
+      }
     }
 
     await transaction.auditLog.create({
@@ -93,7 +128,10 @@ export async function finalizeExpiredCredential({
       },
     });
 
-    return { status: "released", releasedMachine };
+    return {
+      status: releasedMachine ? "released" : "held",
+      releasedMachine,
+    };
   });
 }
 
@@ -111,10 +149,11 @@ export async function expireCredential({
     select: {
       machine: {
         select: {
-          lastHeartbeat: true,
+          sshHostKeySha256: true,
           tailscaleIp: true,
         },
       },
+      sessionOpenedAt: true,
     },
   });
 
@@ -122,25 +161,30 @@ export async function expireCredential({
     return { status: "already_released", releasedMachine: false };
   }
 
-  if (hasRecentHeartbeat(credential.machine.lastHeartbeat, now)) {
-    try {
-      await revoke(credential.machine);
-    } catch (error: unknown) {
-      console.error("Could not lock expired guest credential", error);
-      return { status: "retry", releasedMachine: false };
-    }
+  if (credential.sessionOpenedAt) {
+    return { status: "active", releasedMachine: false };
+  }
 
-    return finalizeExpiredCredential({
+  if (credential.machine.sshHostKeySha256 === null) {
+    return { status: "retry", releasedMachine: false };
+  }
+
+  try {
+    await revoke(
+      {
+        sshHostKeySha256: credential.machine.sshHostKeySha256,
+        tailscaleIp: credential.machine.tailscaleIp,
+      },
       credentialId,
-      now,
-      detail: "Expired credential locked over SSH before machine release.",
-    });
+    );
+  } catch (error: unknown) {
+    console.error("Could not lock expired guest credential", error);
+    return { status: "retry", releasedMachine: false };
   }
 
   return finalizeExpiredCredential({
     credentialId,
     now,
-    detail:
-      "Expired credential recovered after heartbeat timeout; the local persistent cleanup timer enforces the account lock.",
+    detail: "Expired credential locked over SSH before machine release.",
   });
 }

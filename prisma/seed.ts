@@ -11,12 +11,16 @@ async function main() {
     where: { webhookToken: "local-dev-machine-token-not-for-production" },
     update: {
       name: "Local Lab Machine",
+      sshHostKeySha256:
+        "SHA256:R0CuY0ewFywBJU/1W65a/1GZ9ERuf21kPUAYWz9HUUU",
       tailscaleIp: "100.64.0.10",
       status: "available",
       lastHeartbeat: new Date(),
     },
     create: {
       name: "Local Lab Machine",
+      sshHostKeySha256:
+        "SHA256:R0CuY0ewFywBJU/1W65a/1GZ9ERuf21kPUAYWz9HUUU",
       tailscaleIp: "100.64.0.10",
       webhookToken: "local-dev-machine-token-not-for-production",
       status: "available",

@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { expireCredential } from "@/lib/credential-expiry";
 import { db } from "@/lib/db/client";
+import {
+  readBoundedJsonObject,
+  RequestBodyError,
+} from "@/lib/request-body";
 import { getInstitutionSession } from "@/lib/server-session";
 
 export const runtime = "nodejs";
@@ -8,6 +12,8 @@ export const runtime = "nodejs";
 interface ExpireCheckoutBody {
   machineId?: unknown;
 }
+
+const MAX_EXPIRE_BODY_BYTES = 2_048;
 
 export async function POST(request: Request) {
   const session = await getInstitutionSession(request.headers);
@@ -19,8 +25,12 @@ export async function POST(request: Request) {
   let body: ExpireCheckoutBody;
 
   try {
-    body = (await request.json()) as ExpireCheckoutBody;
-  } catch {
+    body =
+      (await readBoundedJsonObject(request, MAX_EXPIRE_BODY_BYTES)) ?? {};
+  } catch (error: unknown) {
+    if (error instanceof RequestBodyError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
@@ -32,7 +42,7 @@ export async function POST(request: Request) {
   const credential = await db.guestCredential.findFirst({
     where: {
       machineId: body.machineId,
-      studentEmail: session.user.email,
+      studentEmail: session.user.email.toLowerCase(),
       revokedAt: null,
     },
     orderBy: { createdAt: "desc" },
@@ -43,8 +53,17 @@ export async function POST(request: Request) {
   });
 
   if (!credential) {
+    const machine = await db.machine.findUnique({
+      where: { id: body.machineId },
+      select: { safetyHoldCredentialId: true },
+    });
+
     return NextResponse.json(
-      { ok: true, status: "already_released", serverTime: now.toISOString() },
+      {
+        ok: true,
+        status: machine?.safetyHoldCredentialId ? "held" : "already_released",
+        serverTime: now.toISOString(),
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   }

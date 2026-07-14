@@ -1,0 +1,17 @@
+[Unit]
+Description=Secure the LabGate guest account before login services
+DefaultDependencies=no
+After=local-fs.target
+Before=systemd-user-sessions.service display-manager.service ssh.service sshd.service
+RequiresMountsFor=/home/guest /var/lib/labgate /usr/local/sbin
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/guest-boot-lock.sh
+RemainAfterExit=yes
+UMask=0077
+TimeoutStartSec=30s
+
+[Install]
+WantedBy=multi-user.target
+RequiredBy=display-manager.service ssh.service sshd.service

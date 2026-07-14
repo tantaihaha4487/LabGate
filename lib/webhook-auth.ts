@@ -15,6 +15,6 @@ export async function authenticateWebhookMachine(headers: Headers) {
 
   return db.machine.findUnique({
     where: { webhookToken: token },
-    select: { id: true },
+    select: { id: true, webhookToken: true },
   });
 }

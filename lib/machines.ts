@@ -1,13 +1,14 @@
 import { db } from "@/lib/db/client";
+import { isHeartbeatEligible } from "@/lib/machine-liveness";
 
-const OFFLINE_AFTER_MS = 2 * 60 * 1000;
-
-export type PublicMachineStatus = "available" | "occupied" | "offline";
+export type PublicMachineStatus = "available" | "occupied";
+export type PublicMachineConnectivity = "online" | "offline";
 
 export interface PublicMachine {
   id: string;
   name: string;
   status: PublicMachineStatus;
+  connectivity: PublicMachineConnectivity;
   lastHeartbeat: string | null;
 }
 
@@ -18,18 +19,22 @@ export async function listPublicMachines(now = new Date()): Promise<PublicMachin
       id: true,
       name: true,
       status: true,
+      sshHostKeySha256: true,
       lastHeartbeat: true,
     },
   });
-  const heartbeatCutoff = now.getTime() - OFFLINE_AFTER_MS;
+  return machines.map((machine) => {
+    const online = isHeartbeatEligible(machine.lastHeartbeat, now);
 
-  return machines.map((machine) => ({
-    ...machine,
-    status:
-      !machine.lastHeartbeat ||
-      machine.lastHeartbeat.getTime() < heartbeatCutoff
-        ? "offline"
-        : machine.status,
-    lastHeartbeat: machine.lastHeartbeat?.toISOString() ?? null,
-  }));
+    return {
+      id: machine.id,
+      name: machine.name,
+      status:
+        machine.status === "available" && machine.sshHostKeySha256 !== null
+          ? "available"
+          : "occupied",
+      connectivity: online ? "online" : "offline",
+      lastHeartbeat: machine.lastHeartbeat?.toISOString() ?? null,
+    };
+  });
 }

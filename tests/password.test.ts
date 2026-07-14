@@ -30,6 +30,9 @@ test("guest passwords default to eight shell-safe characters and honor the envir
 
     process.env.GUEST_PASSWORD_LENGTH = "8.5";
     assert.throws(() => generateGuestPassword(), /whole number/);
+
+    process.env.GUEST_PASSWORD_LENGTH = " ";
+    assert.throws(() => generateGuestPassword(), /whole number/);
   } finally {
     if (previousLength === undefined) {
       delete process.env.GUEST_PASSWORD_LENGTH;

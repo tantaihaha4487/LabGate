@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { POST as authPost } from "../app/api/auth/[...all]/route";
 import {
   enforceNewUserDomain,
   isAllowedInstitutionEmail,
@@ -26,4 +27,17 @@ test("server-side user hook rejects an off-domain email despite a forged hd valu
 test("server-side user hook accepts a university account", async () => {
   const user = { email: "student@ubu.ac.th" };
   assert.deepEqual(await enforceNewUserDomain(user), { data: user });
+});
+
+test("the auth handler rejects an oversized body before Better Auth buffers it", async () => {
+  const response = await authPost(
+    new Request("http://localhost/api/auth/sign-in/social", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ padding: "x".repeat(70_000) }),
+    }),
+  );
+
+  assert.equal(response.status, 413);
+  assert.match(response.headers.get("cache-control") ?? "", /no-store/);
 });

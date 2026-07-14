@@ -41,33 +41,33 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
 - [ ] Inventory the running Compose service, effective non-secret timeout and
   password-length settings, database location, sweep schedule, and recent
   errors without exposing secret values.
-- [ ] Inventory the physical lab machine's installed LabGate scripts, PAM
+- [x] Inventory the physical lab machine's installed LabGate scripts, PAM
   integration, `guest` account state, timers, heartbeat, tmpfs state, and active
   sessions before making changes.
 
 ### Automated application validation
 
-- [ ] Add regression coverage proving configured password lengths (including
+- [x] Add regression coverage proving configured password lengths (including
   `8`) are exact and invalid/missing values have intentional behavior.
-- [ ] Prove two concurrent checkouts for one available machine yield exactly one
+- [x] Prove two concurrent checkouts for one available machine yield exactly one
   success and one `409` equivalent result.
-- [ ] Prove checkout marks the machine occupied and an unused, unexpired
+- [x] Prove checkout marks the machine occupied and an unused, unexpired
   credential does not release it early.
-- [ ] Prove an unused expired credential is revoked only after a confirmed
+- [x] Prove an unused expired credential is revoked only after a confirmed
   machine lock when the machine is reachable, then becomes available.
-- [ ] Prove `session-open` wins the expiry race: an active session remains
+- [x] Prove `session-open` wins the expiry race: an active session remains
   occupied after the original credential deadline and is not force-revoked by
   the server sweep.
-- [ ] Prove `session-close` revokes the credential and returns the machine to
+- [x] Prove `session-close` revokes the credential and returns the machine to
   available.
-- [ ] Prove webhook authentication, email-domain enforcement, SSH timeouts,
+- [x] Prove webhook authentication, email-domain enforcement, SSH timeouts,
   provisioning rollback, offline derivation, and secret-safe responses/logging.
-- [ ] Pass Prisma validation/generation, unit/integration tests, lint, TypeScript,
+- [x] Pass Prisma validation/generation, unit/integration tests, lint, TypeScript,
   and a production build.
 
 ### Machine-side and live end-to-end validation
 
-- [ ] Audit shell syntax, argument validation, sudoers scope, permissions, and
+- [x] Audit shell syntax, argument validation, sudoers scope, permissions, and
   absence of forbidden per-student account creation/deletion commands.
 - [ ] Run the installer twice and prove it is idempotent with no duplicate PAM
   entries or sudoers changes.
@@ -81,7 +81,7 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   credential deadline.
 - [ ] Prove PAM `close_session` locks `guest`, unmounts the tmpfs, reports
   session-close best-effort, revokes the credential, and releases the machine.
-- [ ] Prove failed/slow webhooks cannot prevent local lock or unmount behavior.
+- [x] Prove failed/slow webhooks cannot prevent local lock or unmount behavior.
 - [ ] Prove the local systemd timer and Pi-side sweep independently recover the
   intended failure cases without terminating a genuinely active session.
 - [ ] Prove heartbeat loss becomes offline within the documented window and
@@ -93,7 +93,7 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   pulls it; limit direct Pi edits to ignored environment/configuration data.
 - [ ] Deploy the reviewed commit on the Pi and record post-deploy health and
   migration evidence.
-- [ ] Document configuration values and matching Pi/lab-machine timeout values,
+- [x] Document configuration values and matching Pi/lab-machine timeout values,
   deployment/update/rollback, machine enrollment, PAM install/inspect/reset,
   manual session open/close validation, timers, recovery, logs, and
   troubleshooting in enough detail for a new operator.
@@ -102,7 +102,36 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
 
 ### Evidence
 
-- Pending baseline audit.
+- 2026-07-14 local baseline: `main`, local HEAD and `origin/main` both
+  `4e521a49ac7b4bdc718259b23370721443a265c9` before this audit change set. The
+  Pi was previously observed at `66c3b72`; it is currently offline in Tailscale
+  (`LastSeen=2026-07-13T19:49:12.1Z`) and SSH times out, so its current HEAD and
+  deployment state cannot yet be re-confirmed.
+- 2026-07-14 physical-host inventory: the designated workstation is
+  EndeavourOS rolling with SDDM, not the contract's Ubuntu Desktop/GDM target.
+  Existing accounts are `guest` UID 950 and `provisioner` UID 951. Legacy
+  cleanup/heartbeat units exist but their timers are inactive, there is no
+  `/home/guest` mount or guest session, and a root RustDesk service is active.
+  No privileged host mutation was performed during inventory.
+- 2026-07-14 automated gates: `npm test` passed 85/85 Node tests and all 27
+  rootless machine protocol tests; `npm run typecheck`, `npm run lint`,
+  `git diff --check`, shell syntax checks, forbidden account-command checks,
+  and `npm run build` passed. `npm audit --omit=dev` reported zero
+  vulnerabilities.
+- 2026-07-14 container gate: `labgate:audit-final` built successfully. From a
+  blank private bind mount it applied all four migrations, passed database
+  postflight, started as UID/GID 1000, created `/app/data` and the database with
+  modes 0700/0600, returned health `200`, rejected unauthenticated machine data
+  with `401`, and emitted the documented CSP, HSTS, anti-framing, and no-store
+  headers.
+- Regression coverage includes exact eight-character passwords and invalid
+  configuration, atomic checkout conflict, pending expiry after confirmed lock,
+  active-session survival past the login deadline, exact close/release,
+  generation conflicts, token rekey races, Ed25519 host pinning, bounded request
+  bodies, and fail-secure SSH compensation. Rootless machine coverage exercises
+  PAM open/close failure paths, local pending expiry, outbox retry/order, boot
+  recovery primitives, tmpfs cleanup, Polkit/sudo/SSH boundaries, and installer
+  input validation without mutating this workstation.
 
 ## Notes / deviations
 
@@ -121,7 +150,16 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
 
 ## Blockers
 
-- The previously recorded lack of a physical test machine is being re-evaluated:
-  the current workstation is now designated as the lab machine. Phase 8 remains
-  open until access, display-manager behavior, and the full physical flow are
-  verified safely.
+- The Raspberry Pi is offline in Tailscale and its SSH endpoint times out. The
+  reviewed commit cannot be pulled/deployed, its database cannot be backed up or
+  migrated, and live Compose/cron/health evidence cannot be refreshed until it
+  returns.
+- The designated physical workstation is EndeavourOS/SDDM rather than the
+  Ubuntu Desktop/GDM production target. It has no passwordless sudo, so an
+  operator must run the documented installer in a maintenance window and type
+  the guest credential at the physical keyboard before live PAM assertions can
+  be checked.
+- A root RustDesk service is active on the physical workstation and conflicts
+  with the physical-only deployment boundary. It has not been disabled because
+  doing so changes an unrelated remote-access service and requires explicit
+  operator authority.

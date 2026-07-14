@@ -1,5 +1,8 @@
 #!/bin/sh
 set -eu
+umask 077
 
-npx prisma migrate deploy
-exec npm run start
+node ./deploy/preflight-migration.mjs
+./node_modules/.bin/prisma migrate deploy
+node ./deploy/postflight-database.mjs
+exec ./node_modules/.bin/next start

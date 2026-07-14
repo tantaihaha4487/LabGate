@@ -1,13 +1,49 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { NodeSSH } from "node-ssh";
+import { isValidCredentialId } from "@/lib/credential-id";
 import { isValidGuestPassword } from "@/lib/password";
+import { sshHostKeySha256Digest } from "@/lib/ssh-host-key";
 
 export interface ProvisionTarget {
+  sshHostKeySha256: string;
   tailscaleIp: string;
+}
+
+export interface ProvisionCredential {
+  credentialId: string;
+  expiresAt: Date;
+  password: string;
 }
 
 const CONNECT_TIMEOUT_MS = 5_000;
 const COMMAND_TIMEOUT_MS = 5_000;
 const GUEST_ACCOUNT_SCRIPT = "/usr/local/sbin/guest-account.sh";
+
+function credentialExpiryUnixSeconds(expiresAt: Date): number {
+  if (!(expiresAt instanceof Date)) {
+    throw new TypeError("Credential expiry must be a valid future Date.");
+  }
+
+  const expiryMilliseconds = expiresAt.getTime();
+
+  if (!Number.isFinite(expiryMilliseconds) || expiryMilliseconds <= Date.now()) {
+    throw new RangeError("Credential expiry must be a valid future Date.");
+  }
+
+  const expiryUnixSeconds = Math.floor(expiryMilliseconds / 1_000);
+  const currentUnixSeconds = Math.floor(Date.now() / 1_000);
+
+  if (
+    !Number.isSafeInteger(expiryUnixSeconds) ||
+    expiryUnixSeconds <= currentUnixSeconds
+  ) {
+    throw new RangeError(
+      "Credential expiry must produce a future safe Unix timestamp.",
+    );
+  }
+
+  return expiryUnixSeconds;
+}
 
 function requiredSshKeyPath(): string {
   const path = process.env.PROVISIONER_SSH_KEY_PATH?.trim();
@@ -46,17 +82,42 @@ async function withTimeout<T>(
 async function runGuestAccountCommand(
   machine: ProvisionTarget,
   action: "issue" | "revoke",
+  credentialId: string,
+  expiresAt?: Date,
   password?: string,
 ): Promise<void> {
-  if (action === "issue" && (!password || !isValidGuestPassword(password))) {
-    throw new Error("Refusing to provision an invalid guest password.");
+  if (!isValidCredentialId(credentialId)) {
+    throw new Error("Refusing to use an invalid credential ID.");
+  }
+
+  const expectedHostKeyDigest = sshHostKeySha256Digest(
+    machine.sshHostKeySha256,
+  );
+
+  if (!expectedHostKeyDigest) {
+    throw new Error("Refusing to connect without a valid SSH host-key pin.");
+  }
+
+  let command: string;
+  let commandStdin: string | undefined;
+
+  if (action === "issue") {
+    if (!password || !isValidGuestPassword(password)) {
+      throw new Error("Refusing to provision an invalid guest password.");
+    }
+
+    if (!expiresAt) {
+      throw new TypeError("Credential expiry must be a valid future Date.");
+    }
+
+    const expiryUnixSeconds = credentialExpiryUnixSeconds(expiresAt);
+    command = `sudo ${GUEST_ACCOUNT_SCRIPT} issue ${credentialId} ${expiryUnixSeconds}`;
+    commandStdin = `${password}\n`;
+  } else {
+    command = `sudo ${GUEST_ACCOUNT_SCRIPT} revoke ${credentialId}`;
   }
 
   const ssh = new NodeSSH();
-  const command =
-    action === "issue"
-      ? `sudo ${GUEST_ACCOUNT_SCRIPT} issue ${password}`
-      : `sudo ${GUEST_ACCOUNT_SCRIPT} revoke`;
 
   try {
     await withTimeout(
@@ -65,13 +126,29 @@ async function runGuestAccountCommand(
         username: "provisioner",
         privateKeyPath: requiredSshKeyPath(),
         readyTimeout: CONNECT_TIMEOUT_MS,
+        algorithms: {
+          serverHostKey: ["ssh-ed25519"],
+        },
+        hostVerifier: (rawHostKey: Buffer): boolean => {
+          const actualHostKeyDigest = createHash("sha256")
+            .update(rawHostKey)
+            .digest();
+
+          return (
+            actualHostKeyDigest.length === expectedHostKeyDigest.length &&
+            timingSafeEqual(actualHostKeyDigest, expectedHostKeyDigest)
+          );
+        },
       }),
       CONNECT_TIMEOUT_MS,
       "SSH connection timed out.",
     );
 
     const result = await withTimeout(
-      ssh.execCommand(command),
+      ssh.execCommand(
+        command,
+        commandStdin === undefined ? undefined : { stdin: commandStdin },
+      ),
       COMMAND_TIMEOUT_MS,
       "Guest account command timed out.",
     );
@@ -84,6 +161,11 @@ async function runGuestAccountCommand(
           : "Guest account command failed with a non-zero exit code.",
       );
     }
+  } catch (error: unknown) {
+    if (action === "issue") {
+      throw new Error("Guest account issue command failed.");
+    }
+    throw error;
   } finally {
     ssh.dispose();
   }
@@ -91,11 +173,20 @@ async function runGuestAccountCommand(
 
 export async function provisionMachine(
   machine: ProvisionTarget,
-  password: string,
+  { credentialId, expiresAt, password }: ProvisionCredential,
 ): Promise<void> {
-  await runGuestAccountCommand(machine, "issue", password);
+  await runGuestAccountCommand(
+    machine,
+    "issue",
+    credentialId,
+    expiresAt,
+    password,
+  );
 }
 
-export async function revokeMachine(machine: ProvisionTarget): Promise<void> {
-  await runGuestAccountCommand(machine, "revoke");
+export async function revokeMachine(
+  machine: ProvisionTarget,
+  credentialId: string,
+): Promise<void> {
+  await runGuestAccountCommand(machine, "revoke", credentialId);
 }

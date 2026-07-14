@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { CheckoutError, checkoutMachine } from "@/lib/checkout";
+import {
+  readBoundedJsonObject,
+  RequestBodyError,
+} from "@/lib/request-body";
 import { getInstitutionSession } from "@/lib/server-session";
 
 export const runtime = "nodejs";
@@ -7,6 +11,8 @@ export const runtime = "nodejs";
 interface CheckoutBody {
   machineId?: unknown;
 }
+
+const MAX_CHECKOUT_BODY_BYTES = 2_048;
 
 export async function POST(request: Request) {
   const session = await getInstitutionSession(request.headers);
@@ -18,8 +24,12 @@ export async function POST(request: Request) {
   let body: CheckoutBody;
 
   try {
-    body = (await request.json()) as CheckoutBody;
-  } catch {
+    body =
+      (await readBoundedJsonObject(request, MAX_CHECKOUT_BODY_BYTES)) ?? {};
+  } catch (error: unknown) {
+    if (error instanceof RequestBodyError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 

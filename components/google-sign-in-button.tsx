@@ -11,13 +11,18 @@ export function GoogleSignInButton() {
     setError(undefined);
     setPending(true);
 
-    const result = await authClient.signIn.social({
-      provider: "google",
-      callbackURL: "/",
-    });
+    try {
+      const result = await authClient.signIn.social({
+        provider: "google",
+        callbackURL: "/",
+      });
 
-    if (result.error) {
-      setError(result.error.message ?? "Google sign-in failed.");
+      if (result.error) {
+        setError(result.error.message ?? "Google sign-in failed.");
+      }
+    } catch {
+      setError("Could not open Google sign-in. Check your connection and retry.");
+    } finally {
       setPending(false);
     }
   }

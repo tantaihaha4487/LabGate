@@ -22,29 +22,34 @@ enum AuditEvent {
   session_close
   force_revoke
   heartbeat_timeout
+  machine_rekey
 }
 
 model Machine {
-  id               String            @id @default(cuid())
-  name             String
-  tailscaleIp      String            @map("tailscale_ip")
-  webhookToken     String            @unique @map("webhook_token")
-  status           MachineStatus     @default(available)
-  lastHeartbeat    DateTime?         @map("last_heartbeat")
-  guestCredentials GuestCredential[]
-  auditLogs        AuditLog[]
+  id                     String            @id @default(cuid())
+  name                   String            @unique
+  tailscaleIp            String            @unique @map("tailscale_ip")
+  sshHostKeySha256       String?           @unique @map("ssh_host_key_sha256")
+  webhookToken           String            @unique @map("webhook_token")
+  status                 MachineStatus     @default(available)
+  lastHeartbeat          DateTime?         @map("last_heartbeat")
+  safetyHoldCredentialId String?           @map("safety_hold_credential_id")
+  guestCredentials       GuestCredential[]
+  auditLogs              AuditLog[]
 
   @@map("machines")
 }
 
 model GuestCredential {
-  id           String    @id @default(cuid())
-  machineId    String    @map("machine_id")
-  studentEmail String    @map("student_email")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  expiresAt    DateTime  @map("expires_at")
-  revokedAt    DateTime? @map("revoked_at")
-  machine      Machine   @relation(fields: [machineId], references: [id])
+  id                  String    @id @default(cuid())
+  machineId           String    @map("machine_id")
+  studentEmail        String    @map("student_email")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  expiresAt           DateTime  @map("expires_at")
+  revokedAt           DateTime? @map("revoked_at")
+  sessionOpenedAt     DateTime? @map("session_opened_at")
+  machineStateVersion Int       @default(0) @map("machine_state_version")
+  machine             Machine   @relation(fields: [machineId], references: [id])
 
   @@map("guest_credentials")
 }

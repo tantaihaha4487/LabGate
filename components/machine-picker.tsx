@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-type MachineStatus = "available" | "occupied" | "offline";
+type MachineStatus = "available" | "occupied";
+type MachineConnectivity = "online" | "offline";
 
 interface Machine {
   id: string;
   name: string;
   status: MachineStatus;
+  connectivity: MachineConnectivity;
   lastHeartbeat: string | null;
 }
 
@@ -24,13 +26,17 @@ interface DisplayCredential extends IssuedCredential {
 
 interface ExpirationState {
   machineId: string;
-  status: "locking" | "released";
+  status: "locking" | "released" | "held" | "active";
   message?: string;
 }
 
 const statusStyles: Record<MachineStatus, string> = {
   available: "bg-emerald-100 text-emerald-800",
   occupied: "bg-amber-100 text-amber-800",
+};
+
+const connectivityStyles: Record<MachineConnectivity, string> = {
+  online: "bg-blue-100 text-blue-800",
   offline: "bg-slate-200 text-slate-600",
 };
 
@@ -61,20 +67,29 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
       setError(undefined);
       setLoading(true);
     }
-    const response = await fetch("/api/machines", { cache: "no-store" });
 
-    if (!response.ok) {
-      setError("Could not load lab machines.");
+    try {
+      const response = await fetch("/api/machines", { cache: "no-store" });
+
+      if (!response.ok) {
+        throw new Error("Machine list request failed.");
+      }
+
+      const data = (await response.json()) as { machines?: unknown };
+
+      if (!Array.isArray(data.machines)) {
+        throw new Error("Machine list response was invalid.");
+      }
+
+      setMachines(data.machines as Machine[]);
+    } catch {
+      if (!background) {
+        setError("Could not load lab machines.");
+      }
+    } finally {
       if (!background) {
         setLoading(false);
       }
-      return;
-    }
-
-    const data = (await response.json()) as { machines: Machine[] };
-    setMachines(data.machines);
-    if (!background) {
-      setLoading(false);
     }
   }, []);
 
@@ -135,7 +150,24 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
         }
 
         if (response.ok) {
-          setExpiration({ machineId, status: "released" });
+          const result = (await response.json()) as {
+            status?: "released" | "held" | "already_released" | "active";
+          };
+
+          if (
+            result.status !== "released" &&
+            result.status !== "held" &&
+            result.status !== "already_released" &&
+            result.status !== "active"
+          ) {
+            throw new Error("Credential expiration response was invalid.");
+          }
+
+          setExpiration({
+            machineId,
+            status:
+              result.status === "already_released" ? "released" : result.status,
+          });
           await loadMachines(true);
           return;
         }
@@ -171,44 +203,69 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
     setPendingId(machineId);
     setError(undefined);
 
-    const response = await fetch("/api/checkout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ machineId }),
-    });
-    const data = (await response.json()) as IssuedCredential & { error?: string };
+    try {
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ machineId }),
+      });
+      const data = (await response.json()) as Partial<IssuedCredential> & {
+        error?: string;
+      };
 
-    if (!response.ok) {
-      setError(data.error ?? "Checkout failed.");
+      if (!response.ok) {
+        setError(data.error ?? "Checkout failed.");
+        await loadMachines(true);
+        return;
+      }
+
+      if (
+        data.username !== "guest" ||
+        typeof data.password !== "string" ||
+        typeof data.expiresAt !== "string" ||
+        typeof data.serverTime !== "string"
+      ) {
+        throw new Error("Checkout response was invalid.");
+      }
+
+      const expiresAtMilliseconds = new Date(data.expiresAt).getTime();
+      const serverTimeMilliseconds = new Date(data.serverTime).getTime();
+      const initialRemainingMilliseconds =
+        expiresAtMilliseconds - serverTimeMilliseconds;
+
+      if (
+        !Number.isFinite(expiresAtMilliseconds) ||
+        !Number.isFinite(serverTimeMilliseconds)
+      ) {
+        throw new Error("Checkout timestamps were invalid.");
+      }
+
+      if (initialRemainingMilliseconds <= 0) {
+        setRemainingSeconds(0);
+        setCredential(undefined);
+        setExpiration({ machineId, status: "locking" });
+        await loadMachines(true);
+        return;
+      }
+
+      setRemainingSeconds(Math.ceil(initialRemainingMilliseconds / 1_000));
+      setExpiration(undefined);
+      setCredential({
+        username: data.username,
+        password: data.password,
+        expiresAt: data.expiresAt,
+        serverTime: data.serverTime,
+        machineId,
+      });
+      await loadMachines(true);
+    } catch {
+      setError(
+        "Checkout could not be completed. Refresh the machine list before retrying.",
+      );
+      await loadMachines(true);
+    } finally {
       setPendingId(undefined);
-      await loadMachines();
-      return;
     }
-
-    const expiresAtMilliseconds = new Date(data.expiresAt).getTime();
-    const serverTimeMilliseconds = new Date(data.serverTime).getTime();
-    const initialRemainingMilliseconds =
-      expiresAtMilliseconds - serverTimeMilliseconds;
-
-    setPendingId(undefined);
-
-    if (initialRemainingMilliseconds <= 0) {
-      setRemainingSeconds(0);
-      setCredential(undefined);
-      setExpiration({ machineId, status: "locking" });
-      await loadMachines();
-      return;
-    }
-
-    setRemainingSeconds(
-      Math.ceil(initialRemainingMilliseconds / 1_000),
-    );
-    setExpiration(undefined);
-    setCredential({
-      ...data,
-      machineId,
-    });
-    await loadMachines();
   }
 
   if (credential) {
@@ -220,10 +277,10 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
         </h2>
         <div
           role="timer"
-          aria-label={`${remainingSeconds} seconds until this credential expires`}
+          aria-label={`${remainingSeconds} seconds left to start the physical login`}
           className="mt-5 flex items-center justify-between rounded-xl border border-amber-300 bg-amber-50 px-5 py-4"
         >
-          <span className="font-semibold text-amber-950">Time remaining</span>
+          <span className="font-semibold text-amber-950">Login window</span>
           <span className="font-mono text-2xl font-bold tabular-nums text-amber-950">
             {formatCountdown(remainingSeconds)}
           </span>
@@ -233,7 +290,7 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
           <dd>{credential.username}</dd>
           <dt className="text-slate-400">Password</dt>
           <dd className="break-all text-lg font-bold">{credential.password}</dd>
-          <dt className="text-slate-400">Expires</dt>
+          <dt className="text-slate-400">Login by</dt>
           <dd>{new Date(credential.expiresAt).toLocaleString()}</dd>
         </dl>
         <p className="mt-4 text-sm text-emerald-900">
@@ -241,8 +298,8 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
           remote desktop connection.
         </p>
         <p className="mt-2 text-sm font-semibold text-amber-900">
-          At 00:00 the password is hidden, the guest account is locked, and the
-          reservation is released.
+          Start the physical login before 00:00. After login succeeds, the
+          session remains active until you log out.
         </p>
       </section>
     );
@@ -250,31 +307,47 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
 
   if (expiration) {
     const released = expiration.status === "released";
+    const held = expiration.status === "held";
+    const active = expiration.status === "active";
 
     return (
       <section
         aria-live="polite"
         className={`mt-8 max-w-xl rounded-2xl border p-6 shadow-sm ${
-          released
+          released || active
             ? "border-emerald-300 bg-emerald-50"
             : "border-amber-300 bg-amber-50"
         }`}
       >
         <p className="font-semibold text-slate-900">
-          {released ? "Credential expired" : "Credential expired—locking guest"}
+          {active
+            ? "Physical session active"
+            : held
+              ? "Credential expired—machine safety hold"
+            : released
+              ? "Credential expired"
+              : "Credential expired—locking guest"}
         </p>
         <h2 className="mt-1 text-2xl font-bold text-slate-950">
-          {released
-            ? "The password is inactive and the machine is available."
-            : "The password has been removed from this page."}
+          {active
+            ? "The login window ended, but your active session remains reserved."
+            : held
+              ? "The password is inactive; the machine is held for safety confirmation."
+            : released
+              ? "The password is inactive and your reservation has been released."
+              : "The password has been removed from this page."}
         </h2>
         <p className="mt-4 text-sm text-slate-700">
           {expiration.message ??
-            (released
-              ? "You may return to the machine list and make a new reservation."
-              : "Waiting for the lab machine to confirm that the guest account is locked.")}
+            (active
+              ? "There is no maximum duration for an active session unless you specify one. Log out at the physical machine to release it."
+              : held
+                ? "You may request a different available machine. This machine will remain unavailable until its exact physical state is safely confirmed."
+              : released
+                ? "You may return to the machine list and make a new reservation."
+                : "Waiting for the lab machine to confirm that the guest account is locked.")}
         </p>
-        {released ? (
+        {released || held || active ? (
           <button
             type="button"
             onClick={() => setExpiration(undefined)}
@@ -305,18 +378,29 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
           <article key={machine.id} className="rounded-2xl bg-white p-6 shadow-sm">
             <div className="flex items-start justify-between gap-4">
               <h2 className="text-xl font-bold">{machine.name}</h2>
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${statusStyles[machine.status]}`}
-              >
-                {machine.status}
-              </span>
+              <div className="flex flex-wrap justify-end gap-2">
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${statusStyles[machine.status]}`}
+                >
+                  {machine.status}
+                </span>
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${connectivityStyles[machine.connectivity]}`}
+                >
+                  {machine.connectivity}
+                </span>
+              </div>
             </div>
             <p className="mt-5 text-xs text-slate-500">
               Last heartbeat: {machine.lastHeartbeat ? new Date(machine.lastHeartbeat).toLocaleString() : "never"}
             </p>
             <button
               type="button"
-              disabled={machine.status !== "available" || pendingId !== undefined}
+              disabled={
+                machine.status !== "available" ||
+                machine.connectivity !== "online" ||
+                pendingId !== undefined
+              }
               onClick={() => checkout(machine.id)}
               className="mt-6 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-slate-300"
             >

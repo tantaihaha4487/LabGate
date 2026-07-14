@@ -1,7 +1,10 @@
 [Unit]
-Description=Expire an abandoned LabGate guest session
+Description=Expire or recover a LabGate guest credential
 After=local-fs.target
+RequiresMountsFor=/home/guest /var/lib/labgate
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/guest-cleanup.sh
+UMask=0077
+TimeoutStartSec=30s

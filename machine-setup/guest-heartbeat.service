@@ -6,3 +6,5 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/guest-heartbeat.sh
+UMask=0077
+TimeoutStartSec=10s

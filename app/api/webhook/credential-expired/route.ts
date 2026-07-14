@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { finalizeExpiredCredential } from "@/lib/credential-expiry";
-import { db } from "@/lib/db/client";
+import { closeMachineCredential } from "@/lib/credential-lifecycle";
+import { readCredentialMachineReport } from "@/lib/machine-report";
+import { RequestBodyError } from "@/lib/request-body";
 import { authenticateWebhookMachine } from "@/lib/webhook-auth";
 
 export const runtime = "nodejs";
@@ -12,68 +13,47 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const now = new Date();
-  const unexpiredCredential = await db.guestCredential.findFirst({
-    where: {
-      machineId: machine.id,
-      revokedAt: null,
-      expiresAt: { gt: now },
-    },
-    select: { id: true },
-  });
+  let report: Awaited<ReturnType<typeof readCredentialMachineReport>>;
 
-  if (unexpiredCredential) {
+  try {
+    report = await readCredentialMachineReport(request);
+  } catch (error: unknown) {
+    if (error instanceof RequestBodyError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
+
+  if (!report) {
     return NextResponse.json(
-      { error: "The current credential has not expired yet." },
-      { status: 409 },
+      { error: "A valid credentialId is required." },
+      { status: 400 },
     );
   }
 
-  const expiredCredentials = await db.guestCredential.findMany({
-    where: {
-      machineId: machine.id,
-      revokedAt: null,
-      expiresAt: { lte: now },
-    },
-    select: { id: true },
-  });
-  let revokedCredentials = 0;
-
-  for (const credential of expiredCredentials) {
-    const result = await finalizeExpiredCredential({
-      credentialId: credential.id,
-      now,
-      detail: "Local cleanup timer locked the expired guest credential.",
-    });
-
-    if (result.status === "released") {
-      revokedCredentials += 1;
-    }
+  if (report.stateVersion !== 3) {
+    return NextResponse.json(
+      { error: "credential-expired requires revoked stateVersion 3." },
+      { status: 400 },
+    );
   }
 
-  await db.$transaction([
-    db.machine.update({
-      where: { id: machine.id },
-      data: { lastHeartbeat: now },
-    }),
-    db.machine.updateMany({
-      where: {
-        id: machine.id,
-        guestCredentials: { some: { revokedAt: null } },
-      },
-      data: { status: "occupied" },
-    }),
-    db.machine.updateMany({
-      where: {
-        id: machine.id,
-        guestCredentials: { none: { revokedAt: null } },
-      },
-      data: { status: "available" },
-    }),
-  ]);
+  const status = await closeMachineCredential({
+    machineId: machine.id,
+    credentialId: report.credentialId,
+    stateVersion: report.stateVersion,
+    event: "force_revoke",
+    detail:
+      "The local cleanup timer confirmed that no guest session was active and the account was locked.",
+    webhookToken: machine.webhookToken,
+  });
+
+  if (status === "unauthorized") {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   return NextResponse.json(
-    { ok: true, revokedCredentials },
+    { ok: true, status },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
