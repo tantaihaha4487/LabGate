@@ -25,7 +25,22 @@ window.
 6. Keep an administrator SSH session open while changing PAM or SSH policy, and
    have physical-console recovery available.
 
-## Initial Pi, OAuth, and network setup
+## Runbook navigation
+
+- For the short, human-oriented guides, start with the [operations index](operations/README.md).
+- [Back to the project README](../README.md)
+- [1. Install the Raspberry Pi](#1-install-the-raspberry-pi)
+- [2. Configure OAuth, HTTPS, and runtime secrets](#2-configure-oauth-https-and-runtime-secrets)
+- [3. Enroll a lab machine](#3-enroll-a-lab-machine)
+- [4. Operate, update, and recover](operations/operations-and-recovery.md)
+- [5. Uninstall or decommission a machine](operations/uninstall.md)
+- [6. Remove the Pi application](operations/pi-uninstall.md)
+
+The numbered sections are the recommended reading order. Detailed security
+procedures remain below the relevant overview so an operator can start with the
+short checklist and then expand only the procedure they need.
+
+## 1. Install the Raspberry Pi
 
 ### Pi prerequisites and clone
 
@@ -118,7 +133,7 @@ migrations. Do not run the development seed in production. Complete the root-onl
 cron configuration and one non-production machine enrollment before allowing a
 student account to see an available endpoint.
 
-## Configuration reference
+## 2. Configure OAuth, HTTPS, and runtime secrets
 
 ### Raspberry Pi application
 
@@ -751,7 +766,7 @@ Install this root crontab line:
 Test the same command interactively, then inspect application logs. The process
 list and crontab should show only the configuration-file path, never the bearer.
 
-## Machine installation and update
+## 3. Enroll a lab machine
 
 ### Prerequisites and variables
 

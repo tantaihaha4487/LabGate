@@ -15,6 +15,23 @@ same account rather than creating or deleting student identities.
 > and execute [docs/E2E-TESTING.md](docs/E2E-TESTING.md) before treating a machine
 > as ready for students.
 
+## Start here
+
+Use the runbook for any deployment or machine change. It is organized as a
+human-readable path, and each major section links back here.
+
+1. [Install the Raspberry Pi application](docs/operations/pi-install.md)
+2. [Configure Google OAuth and HTTPS](docs/operations/configuration.md)
+3. [Enroll the first lab machine](docs/operations/lab-machine-enrollment.md)
+4. [Enroll additional lab machines](docs/operations/lab-machine-enrollment.md)
+5. [Operate, update, and recover the deployment](docs/operations/operations-and-recovery.md)
+6. [Uninstall or decommission a machine](docs/operations/uninstall.md)
+7. [Uninstall the Pi application](docs/operations/pi-uninstall.md)
+
+The short version is: deploy the Pi once, run `setup-machine.sh` once per
+physical endpoint, and never manually copy a machine's webhook token or the
+Pi's provisioning private key.
+
 ## Credential lifecycle
 
 `CREDENTIAL_TTL_HOURS` is the time allowed to use a newly issued password at the
@@ -243,7 +260,7 @@ PAM open recreates the runtime directory empty at mode 0700. The cleanup is
 intentionally bounded; administrators must not grant the shared account other
 persistent writable locations and must not replace it with a filesystem-wide scan.
 
-Use [docs/OPERATIONS.md](docs/OPERATIONS.md#machine-installation-and-update) for
+Use [the operations index](docs/operations/README.md) for
 the exact installation, update, PAM inspection/reset/disable, recovery, timer,
 state, outbox, logging, and security-check procedures.
 
