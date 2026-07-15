@@ -3,9 +3,9 @@
 ## What this project is
 
 A web app that lets students authenticate with Google (restricted to `@ubu.ac.th`),
-reserve one of several shared **physical** Ubuntu Desktop lab machines, and receive a
-temporary login for that machine. Students sit down and type the credentials at the
-physical keyboard — this is not a remote/virtual desktop.
+reserve one of several shared **physical** Ubuntu Desktop or Arch-family desktop lab
+machines, and receive a temporary login for that machine. Students sit down and type
+the credentials at the physical keyboard — this is not a remote/virtual desktop.
 
 **Core design decision, read this before touching any machine-side code:** there is
 exactly **one** shared OS account per machine, named `guest`. The web app never creates
@@ -23,7 +23,7 @@ rotation + unlock on an account that already exists; every "revoking" is a lock.
 | Provisioning transport | `node-ssh` (wraps `ssh2`) | Never shell out to the `ssh` binary |
 | Machine mesh | Tailscale | Pi ↔ every lab machine; provisioning/webhook traffic never touches the public internet |
 | Deployment | Docker Compose on Raspberry Pi 5 | Can reuse existing Jenkins pipeline if present |
-| Machine-side | Bash + forced-command SSH + sudoers + PAM (`pam_exec`) + systemd | Lives in `machine-setup/`, not part of the Next.js app |
+| Machine-side | Ubuntu or Arch-family Linux; Bash + forced-command SSH + sudoers + PAM (`pam_exec`) + systemd | Lives in `machine-setup/`, not part of the Next.js app |
 
 ## Directory structure
 

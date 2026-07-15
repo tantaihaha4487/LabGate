@@ -11,6 +11,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 const installerPath = resolve("machine-setup/install-machine.sh");
+const platformPath = resolve("machine-setup/labgate-platform.sh");
 const provisionerSysusersPath = resolve(
   "machine-setup/labgate-provisioner.conf",
 );
@@ -22,16 +23,75 @@ test("one-shot installer is executable, syntactically valid, and documents its m
     encoding: "utf8",
   });
   assert.equal(syntax.status, 0, syntax.stderr);
+  const platformSyntax = spawnSync("bash", ["-n", platformPath], {
+    encoding: "utf8",
+  });
+  assert.equal(platformSyntax.status, 0, platformSyntax.stderr);
 
   const help = spawnSync(installerPath, ["--help"], { encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /--dry-run/);
   assert.match(help.stdout, /--local/);
   assert.match(help.stdout, /--commit SHA/);
+  assert.match(help.stdout, /Ubuntu or Arch-family Desktop/);
   assert.match(help.stdout, /Secrets are read from \/dev\/tty without echo/);
 });
 
-test("dry-run prints a redacted enrollment preview without requiring Ubuntu or root", () => {
+test("platform classifier accepts Ubuntu, Arch, and Arch derivatives only", () => {
+  const classify = (id: string, idLike = "") =>
+    spawnSync(
+      "bash",
+      [
+        "-c",
+        'source "$1"; labgate_classify_platform "$2" "$3"',
+        "labgate-platform-test",
+        platformPath,
+        id,
+        idLike,
+      ],
+      { encoding: "utf8" },
+    );
+
+  const ubuntu = classify("ubuntu");
+  assert.equal(ubuntu.status, 0, ubuntu.stderr);
+  assert.equal(ubuntu.stdout, "ubuntu\n");
+
+  const arch = classify("arch");
+  assert.equal(arch.status, 0, arch.stderr);
+  assert.equal(arch.stdout, "arch\n");
+
+  const endeavour = classify("endeavouros", "arch");
+  assert.equal(endeavour.status, 0, endeavour.stderr);
+  assert.equal(endeavour.stdout, "arch\n");
+
+  const unrelatedSubstring = classify("notarch", "debian archlike");
+  assert.notEqual(unrelatedSubstring.status, 0);
+  assert.equal(unrelatedSubstring.stdout, "");
+});
+
+test("Arch bootstrap performs a full upgrade with the fixed security dependencies", () => {
+  const source = readFileSync(installerPath, "utf8");
+
+  assert.match(source, /pacman -Syu --needed --noconfirm/);
+  assert.match(source, /IFS= read -r value <\/proc\/sys\/kernel\/hostname/);
+  assert.match(source, /machine_name=\$\{LABGATE_MACHINE_NAME:-\$\(default_machine_name\)\}/);
+  for (const packageName of [
+    "inetutils",
+    "keyutils",
+    "openssh",
+    "pam",
+    "polkit",
+    "shadow",
+    "sudo",
+    "systemd",
+    "tailscale",
+    "util-linux",
+  ]) {
+    assert.match(source, new RegExp(`(^|\\s)${packageName}(\\s|$)`, "m"));
+  }
+});
+
+test("dry-run prints a redacted enrollment preview without requiring root", () => {
   const directory = mkdtempSync(join(tmpdir(), "labgate-installer-test-"));
   const privateKey = join(directory, "provisioner-key");
   const publicKey = `${privateKey}.pub`;

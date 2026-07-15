@@ -69,6 +69,8 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
 
 - [x] Audit shell syntax, argument validation, sudoers scope, permissions, and
   absence of forbidden per-student account creation/deletion commands.
+- [x] Add and validate distro-aware one-shot dependency bootstrap for Ubuntu
+  Desktop and Arch-family desktops, including EndeavourOS with SDDM.
 - [ ] Run the installer twice and prove it is idempotent with no duplicate PAM
   entries or sudoers changes.
 - [ ] Prove an issued password has the configured exact length and can log in
@@ -150,6 +152,14 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   modes 0700/0600, returned health `200`, rejected unauthenticated machine data
   with `401`, and emitted the documented CSP, HSTS, anti-framing, and no-store
   headers.
+- 2026-07-15 Arch bootstrap: the one-shot installer now classifies exact Arch
+  and `ID_LIKE=arch` hosts, performs the required full `pacman -Syu` with fixed
+  dependencies, and retains the common hardened setup path. A local dry run on
+  EndeavourOS/SDDM selected the Arch branch and redacted supplied secrets.
+  `npm test` passed 94/94 Node tests, all 27 private-namespace machine tests,
+  and the uninstall checks; lint, typecheck, Bash syntax, and diff checks also
+  passed. The live package/install mutation and twice-run idempotency gate remain
+  unchecked.
 - Regression coverage includes exact eight-character passwords and invalid
   configuration, atomic checkout conflict, pending expiry after confirmed lock,
   active-session survival past the login deadline, exact close/release,
@@ -163,6 +173,9 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
 
 - Package manager changed from Bun to npm at the user's request; `AGENTS.md` and
   `BUILD_PROMPT.md` were updated to keep the project contract consistent.
+- Physical endpoint support expanded from Ubuntu Desktop to Ubuntu plus
+  Arch-family desktops at the user's request; Arch installation performs a full
+  package upgrade rather than creating an unsupported partial-upgrade state.
 - Restored the full `AGENTS.md` contract after `create-next-app` replaced it with
   generated Next.js guidance; that guidance is retained at the end of the file.
 - Added `MACHINE_REGISTRATION_SECRET` so one-time machine enrollment is not a

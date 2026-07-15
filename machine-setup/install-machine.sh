@@ -53,7 +53,8 @@ usage() {
   cat <<'EOF'
 Usage: install-machine.sh [--dry-run] [--local | --commit SHA]
 
-Interactively installs or updates a physical Ubuntu Desktop LabGate endpoint.
+Interactively installs or updates a physical Ubuntu or Arch-family Desktop
+LabGate endpoint.
 
 Options:
   --dry-run       Validate inputs and print the installation preview only.
@@ -181,6 +182,7 @@ validate_source_tree() {
     guest-webhook-flush.timer
     install-machine.sh
     labgate-common.sh
+    labgate-platform.sh
     labgate-deny-guest-account-change.sh
     labgate-guest.conf
     labgate-provisioner.conf
@@ -197,7 +199,7 @@ validate_source_tree() {
   for file in \
     guest-account.sh guest-boot-lock.sh guest-cleanup.sh guest-heartbeat.sh \
     guest-session-hook.sh guest-webhook-flush.sh install-machine.sh \
-    labgate-common.sh setup-machine.sh; do
+    labgate-common.sh labgate-platform.sh setup-machine.sh; do
     bash -n "${source_directory}/${file}" \
       || die "source archive contains invalid Bash syntax: ${file}"
   done
@@ -270,6 +272,21 @@ read_safe_config_default() {
   printf -v "${destination_name}" '%s' "${fallback}"
 }
 
+default_machine_name() {
+  local value
+
+  if [[ -r /proc/sys/kernel/hostname ]]; then
+    IFS= read -r value </proc/sys/kernel/hostname \
+      || die "could not read the kernel hostname"
+  else
+    require_command hostname
+    value=$(hostname -s) || die "could not determine the hostname"
+  fi
+  value=${value%%.*}
+  [[ -n ${value} ]] || die "the machine hostname is empty"
+  printf '%s\n' "${value}"
+}
+
 provisioner_authorized_keys_path() {
   local home record
 
@@ -285,23 +302,46 @@ provisioner_authorized_keys_path() {
 install_ubuntu_dependencies() {
   local package
   local -a packages=(
-    ca-certificates coreutils curl findutils grep keyutils libpam-modules
-    libpam-modules-bin login mawk openssh-client openssh-server passwd
-    policykit-1 procps sudo systemd systemd-sysv tar util-linux
+    ca-certificates coreutils curl findutils grep hostname keyutils
+    libpam-modules libpam-modules-bin login mawk openssh-client
+    openssh-server passwd policykit-1 procps sudo systemd systemd-sysv tar
+    util-linux
   )
 
   require_command apt-get
   DEBIAN_FRONTEND=noninteractive apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     "${packages[@]}"
-  for package in \
-    curl getent keyctl pkaction sshd ssh-keygen systemctl systemd-sysusers \
-    tailscale timedatectl visudo; do
-    if [[ ${package} == tailscale ]]; then
-      continue
-    fi
+  for package in curl getent hostname keyctl nologin passwd pkaction sshd \
+    ssh-keygen systemctl systemd-sysusers timedatectl visudo; do
     require_command "${package}"
   done
+}
+
+install_arch_dependencies() {
+  local package
+  local -a packages=(
+    bash ca-certificates coreutils curl findutils gawk glibc grep gzip
+    inetutils keyutils openssh pam polkit procps-ng sed shadow sudo systemd
+    tailscale tar util-linux
+  )
+
+  require_command pacman
+  # Arch does not support partial upgrades. Refreshing package databases and
+  # installing prerequisites therefore happens as one full system upgrade.
+  pacman -Syu --needed --noconfirm "${packages[@]}"
+  for package in curl getent hostname keyctl nologin passwd pkaction sshd \
+    ssh-keygen systemctl systemd-sysusers tailscale timedatectl visudo; do
+    require_command "${package}"
+  done
+}
+
+install_platform_dependencies() {
+  case "${os_family}" in
+    ubuntu) install_ubuntu_dependencies ;;
+    arch) install_arch_dependencies ;;
+    *) die "internal unsupported platform selection: ${os_family}" ;;
+  esac
 }
 
 ensure_clock_and_ssh() {
@@ -607,14 +647,35 @@ stage_source_tree
 # shellcheck source=labgate-common.sh
 source "${source_directory}/labgate-common.sh" \
   || die "could not load the reviewed LabGate validation library"
+# shellcheck source=labgate-platform.sh
+source "${source_directory}/labgate-platform.sh" \
+  || die "could not load the reviewed LabGate platform library"
 
 [[ -r /etc/os-release ]] || die "could not identify the operating system"
 # shellcheck source=/etc/os-release
+unset ID ID_LIKE PRETTY_NAME 2>/dev/null || true
 source /etc/os-release
-os_support='Ubuntu Desktop confirmed'
-if [[ ${ID:-} != ubuntu ]]; then
+os_family=$(labgate_classify_platform "${ID:-}" "${ID_LIKE:-}" || true)
+case "${os_family}" in
+  ubuntu)
+    os_support='Ubuntu Desktop confirmed'
+    os_family_label='Ubuntu'
+    dependency_plan='Install the fixed Ubuntu prerequisites and verify clock/SSH.'
+    ;;
+  arch)
+    os_support="${PRETTY_NAME:-Arch Linux} (Arch family) confirmed"
+    os_family_label='Arch'
+    dependency_plan='Fully upgrade Arch packages, install fixed prerequisites, and verify clock/SSH.'
+    ;;
+  *)
+    os_family=unsupported
+    os_family_label='unsupported'
+    dependency_plan='Unsupported host; no package operation is available.'
+    ;;
+esac
+if [[ ${os_family} == unsupported ]]; then
   if (( dry_run == 0 )); then
-    die "the one-shot installer supports Ubuntu Desktop only"
+    die "the one-shot installer supports Ubuntu and Arch-family desktops only"
   fi
   os_support="unsupported ${PRETTY_NAME:-${ID:-unknown}}; real installation would stop"
 fi
@@ -632,7 +693,7 @@ read_safe_config_default existing_api_url \
 read_safe_config_default existing_password_length \
   "${CONFIG_DIRECTORY}/password-length" '8'
 api_url=${LABGATE_API_URL:-}
-machine_name=${LABGATE_MACHINE_NAME:-$(hostname -s)}
+machine_name=${LABGATE_MACHINE_NAME:-$(default_machine_name)}
 password_length=${LABGATE_PASSWORD_LENGTH:-}
 [[ -n ${api_url} ]] || prompt_value api_url 'Pi LabGate API origin' "${existing_api_url}"
 if (( fresh_install == 1 )) && [[ ! ${LABGATE_MACHINE_NAME+x} ]]; then
@@ -721,7 +782,7 @@ printf '%-20s %s\n' 'Tailscale:' "${tailscale_state}"
 printf '%-20s %s\n' 'Provisioner key:' "${key_fingerprint}"
 printf '%-20s %s\n' 'Registration key:' "${registration_summary}"
 printf '\nPlanned changes:\n'
-printf '  1. Install the fixed Ubuntu prerequisites and verify clock/SSH.\n'
+printf '  1. %s\n' "${dependency_plan}"
 printf '  2. Connect this endpoint to Tailscale.\n'
 printf '  3. Verify the Pi health endpoint and enrollment protocol v%s.\n' \
   "${EXPECTED_ENROLLMENT_VERSION}"
@@ -751,8 +812,8 @@ case "${confirmation}" in
   *) die "installation cancelled" ;;
 esac
 
-printf '\n[1/8] Installing Ubuntu prerequisites\n'
-install_ubuntu_dependencies
+printf '\n[1/8] Installing %s prerequisites\n' "${os_family_label}"
+install_platform_dependencies
 validate_public_key_file_shape "${public_key_file}" \
   || die "provisioner public key must be one plain ssh-ed25519 key"
 key_fingerprint=$(public_key_fingerprint "${public_key_file}") \
