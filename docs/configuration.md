@@ -23,6 +23,7 @@ Set every value in <code>.env.local</code>; keep placeholders out of a running d
 | <code>BETTER_AUTH_SECRET</code> | A strong application signing secret. |
 | <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code> | The Google web OAuth client. |
 | <code>ALLOWED_EMAIL_DOMAIN</code> | <code>ubu.ac.th</code>, with server-side suffix enforcement. |
+| <code>ADMIN_EMAILS</code> | Required comma-separated administrator addresses. Entries are trimmed, normalized case-insensitively, deduplicated, and must belong to the exact allowed domain. Keep this server-only; do not use a <code>NEXT_PUBLIC_</code> variable. |
 | <code>DATABASE_URL</code> | <code>file:./data/labgate.db</code>. |
 | <code>PROVISIONER_SSH_KEY_PATH</code> | <code>/run/secrets/provisioner_key</code> in Compose. |
 | <code>CREDENTIAL_TTL_HOURS</code> | Pending login deadline: <code>0.0166667</code> through <code>24</code>. |
@@ -33,6 +34,20 @@ Set every value in <code>.env.local</code>; keep placeholders out of a running d
 Standard Base64 <code>+</code>, <code>/</code>, and terminal <code>=</code> padding are valid in the two bearer
 secrets. Whitespace and quoting are not. Never put a machine webhook token in
 this file; registration generates one per endpoint.
+
+Administrator access is environment-authorized. The app does not store roles in
+SQLite and does not modify <code>.env.local</code>. To add an administrator, sign in as an
+existing administrator, open <code>/admin</code>, and use the configuration generator to
+produce a complete replacement <code>ADMIN_EMAILS=...</code> line. Apply it on the Pi from
+the reviewed checkout with:
+
+~~~sh
+# Pi
+docker compose up -d --force-recreate labgate
+~~~
+
+Removing an address is a manual configuration change: replace the line with the
+reviewed remaining list and force-recreate the service using the same command.
 
 <code>GUEST_PASSWORD_LENGTH</code> is exact on both sides. The application generates that
 many unambiguous alphanumeric characters, and machine setup persists the same

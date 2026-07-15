@@ -9,6 +9,12 @@ there.
 
 ## Development machine: validate and publish
 
+Before publishing an image that requires administrator authorization, prepare a
+valid <code>ADMIN_EMAILS</code> line for the Pi's ignored <code>.env.local</code>. Every address must
+be an exact account under <code>ALLOWED_EMAIL_DOMAIN</code>. Startup intentionally fails if
+the administrator list is missing or invalid, so configure it on the Pi before
+replacing the running container.
+
 Run from the repository checkout. Stage only the intended files; preserve
 unrelated worktree changes.
 
@@ -39,12 +45,18 @@ SQLite and its bind-mounted data are quiescent.
 cd ~/LabGate
 git fetch origin main
 git log -1 --oneline
+sudoedit .env.local
 docker compose stop labgate
 sqlite3 data/labgate.db ".backup 'backups/labgate-$(date -u +%Y%m%dT%H%M%SZ).db'"
 git pull --ff-only origin main
 git diff HEAD@{1}..HEAD -- prisma/migrations
 docker compose up --build -d
 ~~~
+
+Before saving <code>.env.local</code>, add or replace the complete
+<code>ADMIN_EMAILS=...</code> line prepared during review. Do not put it in a
+<code>NEXT_PUBLIC_</code> variable. The admin dashboard can generate the replacement line,
+but it never edits the Pi environment itself.
 
 The container entrypoint performs startup configuration validation, migration
 preflight, <code>prisma migrate deploy</code>, and database postflight before starting
