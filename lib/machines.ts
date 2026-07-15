@@ -14,6 +14,7 @@ export interface PublicMachine {
 
 export async function listPublicMachines(now = new Date()): Promise<PublicMachine[]> {
   const machines = await db.machine.findMany({
+    where: { isHidden: false },
     orderBy: { name: "asc" },
     select: {
       id: true,

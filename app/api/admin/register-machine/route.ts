@@ -206,6 +206,7 @@ export async function POST(request: Request) {
           tailscaleIp: body.tailscaleIp,
           webhookToken: candidateToken,
           status: "offline",
+          isHidden: false,
           lastHeartbeat: null,
         },
         select: { webhookToken: true },

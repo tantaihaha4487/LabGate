@@ -296,6 +296,7 @@ export async function checkoutMachine({
         where: {
           id: machineId,
           status: "available",
+          isHidden: false,
           sshHostKeySha256: { not: null },
           safetyHoldCredentialId: null,
           lastHeartbeat: {
