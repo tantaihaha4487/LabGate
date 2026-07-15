@@ -142,6 +142,12 @@ test("startup preflight rejects invalid app secrets and provisioner key paths", 
     [{ BETTER_AUTH_SECRET: " " }, /BETTER_AUTH_SECRET/],
     [{ BETTER_AUTH_URL: "not-a-url" }, /BETTER_AUTH_URL/],
     [{ ALLOWED_EMAIL_DOMAIN: "not a domain" }, /ALLOWED_EMAIL_DOMAIN/],
+    [{ ADMIN_EMAILS: "" }, /ADMIN_EMAILS/],
+    [{ ADMIN_EMAILS: "admin" }, /ADMIN_EMAILS/],
+    [{ ADMIN_EMAILS: "admin@gmail.com" }, /ADMIN_EMAILS/],
+    [{ ADMIN_EMAILS: "admin@sub.ubu.ac.th" }, /ADMIN_EMAILS/],
+    [{ ADMIN_EMAILS: "admin@ubu.ac.th.example.com" }, /ADMIN_EMAILS/],
+    [{ ADMIN_EMAILS: "admin@ubu.ac.th," }, /ADMIN_EMAILS/],
     [
       { MACHINE_REGISTRATION_SECRET: "contains\"unsupported-characters" },
       /MACHINE_REGISTRATION_SECRET/,
@@ -164,6 +170,11 @@ test("startup preflight rejects invalid app secrets and provisioner key paths", 
     MACHINE_REGISTRATION_SECRET: "AbCdEfGhIjKlMnOpQrStUvWxYz+/==",
   });
   assert.equal(base64Bearer.status, 0, base64Bearer.stderr);
+
+  const normalizedAdmins = runPreflightWithEnvironment(missingDatabase, {
+    ADMIN_EMAILS: " ADMIN@UBU.AC.TH,admin@ubu.ac.th ",
+  });
+  assert.equal(normalizedAdmins.status, 0, normalizedAdmins.stderr);
 });
 
 test("migration preflight blocks duplicate physical machine identities", () => {

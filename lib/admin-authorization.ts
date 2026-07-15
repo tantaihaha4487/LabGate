@@ -1,6 +1,21 @@
 import { configuredAdminEmails } from "@/lib/admin-emails";
 import { auth, isAllowedInstitutionEmail } from "@/lib/auth";
 
+export type AdminAuthorizationStatus =
+  | "unauthenticated"
+  | "forbidden"
+  | "authorized";
+
+export function adminPageRedirectForAuthorization(
+  status: AdminAuthorizationStatus,
+): "/login" | "/" | null {
+  if (status === "unauthenticated") {
+    return "/login";
+  }
+
+  return status === "forbidden" ? "/" : null;
+}
+
 export function isConfiguredAdminEmail(
   email: string | null | undefined,
 ): email is string {

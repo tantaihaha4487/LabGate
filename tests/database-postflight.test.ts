@@ -73,6 +73,84 @@ test("database postflight accepts the complete migrated schema", () => {
   }
 });
 
+test("machine visibility migration defaults existing rows to visible", () => {
+  const database = new Database(":memory:");
+  const visibilityMigration = readFileSync(
+    resolve(
+      "prisma/migrations/20260715120000_add_machine_visibility/migration.sql",
+    ),
+    "utf8",
+  );
+
+  try {
+    database.exec(`
+      CREATE TABLE machines (
+        id TEXT NOT NULL PRIMARY KEY,
+        name TEXT NOT NULL
+      );
+      INSERT INTO machines (id, name) VALUES ('existing', 'Existing machine');
+    `);
+    database.exec(visibilityMigration);
+
+    const columns = database.prepare("PRAGMA table_info(machines)").all() as Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+    }>;
+    const column = columns.find((candidate) => candidate.name === "is_hidden");
+    assert.deepEqual(
+      column && {
+        type: column.type,
+        notnull: column.notnull,
+        defaultValue: column.dflt_value,
+      },
+      { type: "BOOLEAN", notnull: 1, defaultValue: "false" },
+    );
+    assert.deepEqual(
+      database
+        .prepare(
+          "SELECT is_hidden, typeof(is_hidden) AS storage_type FROM machines WHERE id = 'existing'",
+        )
+        .get(),
+      { is_hidden: 0, storage_type: "integer" },
+    );
+  } finally {
+    database.close();
+  }
+});
+
+test("database postflight rejects non-Boolean machine visibility values", () => {
+  const { databasePath, directory } = createMigratedDatabase();
+  const database = new Database(databasePath);
+
+  try {
+    database.pragma("ignore_check_constraints = ON");
+    database
+      .prepare(
+        `INSERT INTO machines
+           (id, name, tailscale_ip, webhook_token, status, is_hidden)
+         VALUES (?, ?, ?, ?, 'offline', 2)`,
+      )
+      .run(
+        randomUUID(),
+        "Invalid visibility",
+        "100.64.0.39",
+        `invalid-visibility-${randomUUID()}`,
+      );
+  } finally {
+    database.close();
+  }
+
+  try {
+    const result = runPostflight(databasePath);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /non-Boolean is_hidden value/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("database postflight verifies both current-credential partial unique predicates", () => {
   for (const mutation of [
     `DROP INDEX guest_credentials_active_machine_key`,

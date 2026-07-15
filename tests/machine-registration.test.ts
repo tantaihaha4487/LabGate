@@ -105,6 +105,7 @@ test("machine registration requires the enrollment secret and returns one token"
     assert.equal(machine.webhookToken, result.webhookToken);
     assert.equal(machine.sshHostKeySha256, body.sshHostKeySha256);
     assert.equal(machine.status, "offline");
+    assert.equal(machine.isHidden, false);
     assert.equal(machine.lastHeartbeat, null);
 
     const safeHeartbeat = await heartbeat(
@@ -535,6 +536,7 @@ test("drained machine rekey rotates its token and waits for a safe heartbeat", a
       tailscaleIp: "100.64.0.230",
       webhookToken: originalToken,
       status: "available",
+      isHidden: true,
       lastHeartbeat: new Date(),
     },
   });
@@ -604,6 +606,7 @@ test("drained machine rekey rotates its token and waits for a safe heartbeat", a
     assert.equal(held.sshHostKeySha256, body.sshHostKeySha256);
     assert.equal(held.tailscaleIp, body.tailscaleIp);
     assert.equal(held.status, "offline");
+    assert.equal(held.isHidden, true);
     assert.equal(held.lastHeartbeat, null);
     assert.equal(held.webhookToken, result.webhookToken);
     assert.equal(
@@ -638,11 +641,11 @@ test("drained machine rekey rotates its token and waits for a safe heartbeat", a
       ((await confirmed.json()) as { status: string }).status,
       "already_closed",
     );
-    assert.equal(
-      (await db.machine.findUniqueOrThrow({ where: { id: machine.id } }))
-        .status,
-      "available",
-    );
+    const available = await db.machine.findUniqueOrThrow({
+      where: { id: machine.id },
+    });
+    assert.equal(available.status, "available");
+    assert.equal(available.isHidden, true);
   } finally {
     await db.auditLog.deleteMany({ where: { machineId: machine.id } });
     await db.guestCredential.deleteMany({ where: { machineId: machine.id } });

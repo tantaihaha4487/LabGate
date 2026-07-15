@@ -16,6 +16,22 @@ are checked.
 - [x] Phase 7 — Backstop sweep (server side)
 - [ ] Phase 8 — End-to-end pass
 
+## Admin dashboard tracker
+
+- [x] Require and validate exact-domain `ADMIN_EMAILS` configuration at
+  runtime and production preflight without storing administrator roles in SQLite.
+- [x] Add the visibility migration, database postflight checks, independently
+  authorized page/APIs, secret-safe machine inventory, and idempotent audited
+  hide/restore mutations.
+- [x] Keep hidden machines managed while filtering student listings and the
+  atomic checkout claim; preserve reservations, lifecycle status, heartbeats,
+  safety holds, and registration/rekey behavior.
+- [x] Add the 15-second admin dashboard refresh, configured-admin list,
+  replacement-line generator, Pi instructions, and focused automated coverage.
+- [ ] Configure `ADMIN_EMAILS` on the Pi before deploying the image, then
+  complete signed-out, institutional non-admin, and configured-admin manual
+  hide/restore acceptance. This does not mark Phase 8 complete.
+
 ## Phase 8 audit tracker
 
 Confirmed lifecycle contract:
