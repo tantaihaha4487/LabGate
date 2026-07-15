@@ -301,6 +301,30 @@ test("child output is sanitized and redacted without masking command status", ()
   assert.doesNotMatch(renderer.stdout, /test-only-registration-secret-123/);
   assert.doesNotMatch(renderer.stdout, /test-only-tailscale-auth-key-456/);
   assert.match(source, /sed -u -E/);
+
+  const rendererFailure = spawnSync(
+    "bash",
+    [
+      "-c",
+      [
+        "set -uo pipefail",
+        "style_child=$'\\033[2m'",
+        "style_reset=$'\\033[0m'",
+        "stdout_style_used=0 registration_secret= tailscale_auth_key=",
+        'sed() { return 41; }',
+        'die() { printf "renderer error: %s\\n" "$1" >&2; exit 99; }',
+        helperSource,
+        "run_child_command printf 'child\\n'",
+      ].join("\n"),
+    ],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(rendererFailure.status, 99);
+  assert.match(
+    rendererFailure.stderr,
+    /could not safely render child-command output/,
+  );
 });
 
 test("success and failure action blocks provide a safe operator handoff", () => {

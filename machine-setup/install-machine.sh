@@ -256,7 +256,6 @@ render_child_output() {
         -e $'s/[\001-\010\013-\037\177]//g' \
         -e $'s/^/\033[2m| /' \
         -e $'s/$/\033[0m/'
-    stdout_style_used=1
   else
     redact_child_output \
       | LC_ALL=C sed -u -E \
