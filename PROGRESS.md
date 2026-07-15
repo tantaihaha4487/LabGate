@@ -124,6 +124,13 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
 
 ### Evidence
 
+- 2026-07-15 admin dashboard gate: Prisma validation/generation and all five
+  migrations passed; `npm test` passed 105/105 Node tests, all 27 rootless
+  machine protocol tests, and uninstall checks. TypeScript, lint, diff checks,
+  and the production build passed with `/admin` plus both admin machine routes
+  emitted as dynamic server routes. Pi configuration/deployment and manual
+  admin/non-admin hide/restore acceptance remain outstanding, so Phase 8 stays
+  unchecked.
 - 2026-07-14 local baseline: `main`, local HEAD and `origin/main` both
   `4e521a49ac7b4bdc718259b23370721443a265c9` before this audit change set. The
   Pi was previously observed at `66c3b72`; it is currently offline in Tailscale
