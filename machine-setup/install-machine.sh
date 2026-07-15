@@ -28,6 +28,28 @@ provided_registration_secret=${LABGATE_REGISTRATION_SECRET:-}
 provided_tailscale_auth_key=${TAILSCALE_AUTH_KEY:-}
 unset LABGATE_REGISTRATION_SECRET TAILSCALE_AUTH_KEY MACHINE_REGISTRATION_SECRET 2>/dev/null || true
 
+style_reset=
+style_heading=
+style_label=
+style_success=
+style_warning=
+style_child=
+stderr_style_reset=
+stderr_style_error=
+stderr_style_warning=
+prompt_style_reset=
+prompt_style_label=
+prompt_style_warning=
+color_mode=auto
+color_suppressed=0
+stdout_style_used=0
+stderr_style_used=0
+prompt_style_used=0
+current_stage=0
+current_stage_title=
+failure_reported=0
+failure_recovery=guide
+
 cleanup() {
   registration_secret=
   tailscale_auth_key=
@@ -39,14 +61,228 @@ cleanup() {
       [[ ! -d ${runtime_directory} ]] || rm -rf -- "${runtime_directory}"
       ;;
   esac
+  reset_terminal_styles
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
 die() {
-  printf 'install-machine: %s\n' "$1" >&2
+  printf '%binstall-machine: ERROR: %s%b\n' \
+    "${stderr_style_error}" "$1" "${stderr_style_reset}" >&2
+  [[ -z ${stderr_style_error} ]] || stderr_style_used=1
+  if (( current_stage > 0 && failure_reported == 0 )); then
+    print_stage_failure
+  fi
   exit 1
+}
+
+initialize_terminal_styles() {
+  color_mode=${LABGATE_INSTALL_COLOR:-auto}
+
+  case "${color_mode}" in
+    auto|always|never) ;;
+    *)
+      printf 'install-machine: ERROR: LABGATE_INSTALL_COLOR must be auto, always, or never\n' >&2
+      exit 1
+      ;;
+  esac
+
+  if [[ ${NO_COLOR+x} || ${TERM:-dumb} == dumb || ${color_mode} == never ]]; then
+    color_suppressed=1
+    return 0
+  fi
+
+  if [[ ${color_mode} == always || -t 1 ]]; then
+    style_reset=$'\033[0m'
+    style_heading=$'\033[1;36m'
+    style_label=$'\033[1;34m'
+    style_success=$'\033[1;32m'
+    style_warning=$'\033[1;33m'
+    style_child=$'\033[2m'
+  fi
+  if [[ ${color_mode} == always || -t 2 ]]; then
+    stderr_style_reset=$'\033[0m'
+    stderr_style_error=$'\033[1;31m'
+    stderr_style_warning=$'\033[1;33m'
+  fi
+}
+
+initialize_prompt_styles() {
+  prompt_style_reset=
+  prompt_style_label=
+  prompt_style_warning=
+  (( color_suppressed == 0 )) || return 0
+  if [[ ${color_mode} == always || -t 3 ]]; then
+    prompt_style_reset=$'\033[0m'
+    prompt_style_label=$'\033[1;34m'
+    prompt_style_warning=$'\033[1;33m'
+  fi
+}
+
+reset_terminal_styles() {
+  if (( stdout_style_used == 1 )); then
+    printf '%b' $'\033[0m'
+  fi
+  if (( stderr_style_used == 1 )); then
+    printf '%b' $'\033[0m' >&2
+  fi
+  if (( prompt_style_used == 1 )) && exec 3<>/dev/tty 2>/dev/null; then
+    printf '%b' $'\033[0m' >&3
+    exec 3>&-
+  fi
+}
+
+print_heading() {
+  printf '\n%b%s%b\n' "${style_heading}" "$1" "${style_reset}"
+  [[ -z ${style_heading} ]] || stdout_style_used=1
+}
+
+print_success_heading() {
+  printf '\n%b%s%b\n' "${style_success}" "$1" "${style_reset}"
+  [[ -z ${style_success} ]] || stdout_style_used=1
+}
+
+print_preview_row() {
+  printf '%b%-20s%b %s\n' "${style_label}" "$1" "${style_reset}" "$2"
+  [[ -z ${style_label} ]] || stdout_style_used=1
+}
+
+print_completion_row() {
+  printf '%b%-24s%b %s\n' "${style_label}" "$1" "${style_reset}" "$2"
+  [[ -z ${style_label} ]] || stdout_style_used=1
+}
+
+print_stage() {
+  current_stage=$1
+  current_stage_title=$2
+  printf '\n%b[%s/8]%b %s\n' \
+    "${style_heading}" "$1" "${style_reset}" "$2"
+  [[ -z ${style_heading} ]] || stdout_style_used=1
+}
+
+print_stage_success() {
+  printf '%b[OK] %s%b\n' "${style_success}" "$1" "${style_reset}"
+  [[ -z ${style_success} ]] || stdout_style_used=1
+}
+
+print_input_error() {
+  printf '%bInvalid value: %s%b\n' \
+    "${stderr_style_error}" "$1" "${stderr_style_reset}" >&2
+  [[ -z ${stderr_style_error} ]] || stderr_style_used=1
+}
+
+documentation_url() {
+  local revision=${source_revision:-${DEFAULT_REF}}
+
+  [[ ${revision} =~ ^[0-9a-f]{40}$ ]] || revision=${DEFAULT_REF}
+  printf 'https://github.com/%s/%s/blob/%s/docs/recovery.md#physical-acceptance\n' \
+    "${REPOSITORY_OWNER}" "${REPOSITORY_NAME}" "${revision}"
+}
+
+print_stage_failure() {
+  failure_reported=1
+  printf '\n%b[ERROR] Stage %s/8 failed: %s.%b\n' \
+    "${stderr_style_error}" "${current_stage}" "${current_stage_title}" \
+    "${stderr_style_reset}" >&2
+  printf '%bRequired operator action%b\n' \
+    "${stderr_style_warning}" "${stderr_style_reset}" >&2
+  if [[ ${failure_recovery} == heartbeat ]]; then
+    printf '  sudo systemctl status guest-heartbeat.service --no-pager\n' >&2
+    printf '  sudo journalctl -u guest-heartbeat.service -n 100 --no-pager\n' >&2
+    printf '  After correcting the cause: sudo systemctl start guest-heartbeat.service\n' >&2
+  else
+    printf '  Recovery guide: %s\n' "$(documentation_url)" >&2
+  fi
+  printf '%bDo not allow student use until recovery and physical acceptance pass.%b\n' \
+    "${stderr_style_warning}" "${stderr_style_reset}" >&2
+  if [[ -n ${stderr_style_error}${stderr_style_warning} ]]; then
+    stderr_style_used=1
+  fi
+}
+
+print_completion_summary() {
+  local host_key_pin=$1
+
+  print_success_heading 'LabGate machine installation complete'
+  print_completion_row 'Machine:' "${machine_summary}"
+  print_completion_row 'Pi enrollment API:' \
+    "healthy; protocol v${EXPECTED_ENROLLMENT_VERSION}"
+  if (( fresh_install == 1 )); then
+    print_completion_row 'Registration access:' 'accepted'
+  else
+    print_completion_row 'Registered identity:' 'preserved'
+  fi
+  print_completion_row 'Tailscale address:' "${tailscale_ip}"
+  print_completion_row 'SSH host-key pin:' "${host_key_pin}"
+  print_completion_row 'Provisioner key:' "${key_fingerprint}"
+  print_completion_row 'Guest account:' 'locked'
+  print_completion_row 'Lifecycle timers:' 'enabled and active'
+  print_completion_row 'Initial heartbeat:' 'local service completed'
+  printf '\n%bRequired operator actions%b\n' \
+    "${style_warning}" "${style_reset}"
+  [[ -z ${style_warning} ]] || stdout_style_used=1
+  printf '  1. Confirm the LabGate dashboard shows this machine as available.\n'
+  printf '  2. Complete physical login, active-session, logout, cleanup, and expiry checks.\n'
+  printf '  3. Record the evidence before allowing student use.\n'
+  printf '%bManual shell commands:%b none; the initial heartbeat service already ran.\n' \
+    "${style_label}" "${style_reset}"
+  printf '%bChecklist:%b %s\n' \
+    "${style_label}" "${style_reset}" "$(documentation_url)"
+  [[ -z ${style_label} ]] || stdout_style_used=1
+}
+
+redact_child_output() {
+  local line
+
+  while IFS= read -r line || [[ -n ${line} ]]; do
+    if [[ -n ${registration_secret} ]]; then
+      line=${line//"${registration_secret}"/'[REDACTED]'}
+    fi
+    if [[ -n ${tailscale_auth_key} ]]; then
+      line=${line//"${tailscale_auth_key}"/'[REDACTED]'}
+    fi
+    printf '%s\n' "${line}"
+  done
+}
+
+render_child_output() {
+  if [[ -n ${style_child} ]]; then
+    redact_child_output \
+      | LC_ALL=C sed -u -E \
+        -e $'s/\033\\][^\a]*(\a|\033\\\\)//g' \
+        -e $'s/\033\\[[0-?]*[ -\\/]*[@-~]//g' \
+        -e $'s/\033[@-_]//g' \
+        -e $'s/[\001-\010\013-\037\177]//g' \
+        -e $'s/^/\033[2m| /' \
+        -e $'s/$/\033[0m/'
+    stdout_style_used=1
+  else
+    redact_child_output \
+      | LC_ALL=C sed -u -E \
+        -e $'s/\033\\][^\a]*(\a|\033\\\\)//g' \
+        -e $'s/\033\\[[0-?]*[ -\\/]*[@-~]//g' \
+        -e $'s/\033[@-_]//g' \
+        -e $'s/[\001-\010\013-\037\177]//g' \
+        -e 's/^/| /'
+  fi
+}
+
+run_child_command() {
+  local command_status renderer_status had_errexit=0
+  local -a pipeline_status
+
+  [[ $- != *e* ]] || had_errexit=1
+  [[ -z ${style_child} ]] || stdout_style_used=1
+  set +e
+  "$@" 2>&1 | render_child_output
+  pipeline_status=("${PIPESTATUS[@]}")
+  command_status=${pipeline_status[0]}
+  renderer_status=${pipeline_status[1]}
+  (( had_errexit == 0 )) || set -e
+  (( renderer_status == 0 )) \
+    || die "could not safely render child-command output"
+  return "${command_status}"
 }
 
 usage() {
@@ -64,7 +300,9 @@ Options:
 
 Fresh enrollment prompts for the Pi API origin, machine name, password length,
 registration secret, optional Tailscale auth key, and the Pi's Ed25519
-provisioner public key. Secrets are read from /dev/tty without echo.
+provisioner public key. Secrets are read from /dev/tty without echo. Color is
+enabled automatically on a terminal and disabled when output is redirected or
+NO_COLOR is set.
 EOF
 }
 
@@ -89,17 +327,35 @@ prompt_value() {
   if ! exec 3<>/dev/tty 2>/dev/null; then
     die "${label} requires a terminal; rerun from an administrator terminal"
   fi
+  initialize_prompt_styles
   if [[ -n ${default_value} ]]; then
-    printf '%s [%s]: ' "${label}" "${default_value}" >&3
+    printf '%b%s%b [%s]: ' \
+      "${prompt_style_label}" "${label}" "${prompt_style_reset}" \
+      "${default_value}" >&3
   else
-    printf '%s: ' "${label}" >&3
+    printf '%b%s%b: ' \
+      "${prompt_style_label}" "${label}" "${prompt_style_reset}" >&3
   fi
+  [[ -z ${prompt_style_label} ]] || prompt_style_used=1
   IFS= read -r value <&3 || die "could not read ${label}"
   exec 3>&-
   if [[ -z ${value} ]]; then
     value=${default_value}
   fi
   printf -v "${destination_name}" '%s' "${value}"
+}
+
+prompt_validated_value() {
+  local destination_name=$1 label=$2 default_value=$3 validator=$4 error_message=$5 value
+
+  while true; do
+    prompt_value value "${label}" "${default_value}"
+    if "${validator}" "${value}"; then
+      printf -v "${destination_name}" '%s' "${value}"
+      return
+    fi
+    print_input_error "${error_message}"
+  done
 }
 
 prompt_secret() {
@@ -110,15 +366,39 @@ prompt_secret() {
   if ! exec 3<>/dev/tty 2>/dev/null; then
     die "${label} requires a terminal; rerun from an administrator terminal"
   fi
+  initialize_prompt_styles
   if (( optional == 1 )); then
-    printf '%s (optional; press Enter to skip): ' "${label}" >&3
+    printf '%b%s%b (optional; press Enter to skip): ' \
+      "${prompt_style_label}" "${label}" "${prompt_style_reset}" >&3
   else
-    printf '%s: ' "${label}" >&3
+    printf '%b%s%b: ' \
+      "${prompt_style_label}" "${label}" "${prompt_style_reset}" >&3
   fi
+  [[ -z ${prompt_style_label} ]] || prompt_style_used=1
   IFS= read -r -s value <&3 || die "could not read ${label}"
   printf '\n' >&3
   exec 3>&-
   printf -v "${destination_name}" '%s' "${value}"
+}
+
+prompt_registration_secret() {
+  while true; do
+    prompt_secret registration_secret 'Machine registration secret'
+    if labgate_validate_registration_secret "${registration_secret}"; then
+      return
+    fi
+    registration_secret=
+    print_input_error 'registration secret must be a 20-256 character RFC 6750 b64token'
+  done
+}
+
+validate_machine_name() {
+  [[ $1 =~ ^[A-Za-z0-9._\ -]{1,64}$ ]]
+}
+
+validate_password_length() {
+  [[ $1 =~ ^[0-9]{1,3}$ ]] \
+    && (( 10#$1 >= 8 && 10#$1 <= 128 ))
 }
 
 validate_public_key_line() {
@@ -309,9 +589,11 @@ install_ubuntu_dependencies() {
   )
 
   require_command apt-get
-  DEBIAN_FRONTEND=noninteractive apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    "${packages[@]}"
+  run_child_command env DEBIAN_FRONTEND=noninteractive apt-get update \
+    || die "apt package-index refresh failed"
+  run_child_command env DEBIAN_FRONTEND=noninteractive \
+    apt-get install -y --no-install-recommends "${packages[@]}" \
+    || die "Ubuntu prerequisite installation failed"
   for package in curl getent hostname keyctl nologin passwd pkaction sshd \
     ssh-keygen systemctl systemd-sysusers timedatectl visudo; do
     require_command "${package}"
@@ -329,7 +611,8 @@ install_arch_dependencies() {
   require_command pacman
   # Arch does not support partial upgrades. Refreshing package databases and
   # installing prerequisites therefore happens as one full system upgrade.
-  pacman -Syu --needed --noconfirm "${packages[@]}"
+  run_child_command pacman -Syu --needed --noconfirm "${packages[@]}" \
+    || die "Arch full upgrade and prerequisite installation failed"
   for package in curl getent hostname keyctl nologin passwd pkaction sshd \
     ssh-keygen systemctl systemd-sysusers tailscale timedatectl visudo; do
     require_command "${package}"
@@ -347,7 +630,7 @@ install_platform_dependencies() {
 ensure_clock_and_ssh() {
   local synchronized
 
-  sshd -t || die "OpenSSH configuration is invalid"
+  run_child_command sshd -t || die "OpenSSH configuration is invalid"
   if systemctl list-unit-files ssh.service >/dev/null 2>&1; then
     systemctl enable --now ssh.service >/dev/null
   elif systemctl list-unit-files sshd.service >/dev/null 2>&1; then
@@ -380,7 +663,7 @@ ensure_tailscale() {
       --output "${tailscale_installer}" \
       --url https://tailscale.com/install.sh \
       || die "could not download the official Tailscale installer"
-    sh "${tailscale_installer}" \
+    run_child_command sh "${tailscale_installer}" \
       || die "the official Tailscale installer failed"
   fi
   require_command tailscale
@@ -394,11 +677,12 @@ ensure_tailscale() {
         || die "Tailscale auth key is malformed"
       new_runtime_file tailscale_key_file
       printf '%s\n' "${tailscale_auth_key}" >"${tailscale_key_file}"
-      tailscale up --auth-key="file:${tailscale_key_file}" \
+      run_child_command tailscale up --auth-key="file:${tailscale_key_file}" \
         || die "Tailscale authentication failed"
       : >"${tailscale_key_file}"
     else
-      tailscale up || die "interactive Tailscale authentication failed"
+      run_child_command tailscale up \
+        || die "interactive Tailscale authentication failed"
     fi
   fi
   tailscale_auth_key=
@@ -583,7 +867,8 @@ run_hardened_setup() {
   else
     unset LABGATE_REGISTRATION_SECRET 2>/dev/null || true
   fi
-  bash "${source_directory}/setup-machine.sh"
+  run_child_command bash "${source_directory}/setup-machine.sh" \
+    || die "hardened LabGate machine setup failed"
   registration_secret=
   unset LABGATE_REGISTRATION_SECRET 2>/dev/null || true
 }
@@ -601,9 +886,13 @@ verify_installation() {
     systemctl is-active --quiet "${unit}" \
       || die "${unit} is not active"
   done
-  systemctl start guest-heartbeat.service \
-    || die "initial safe heartbeat service failed"
+  if ! run_child_command systemctl start guest-heartbeat.service; then
+    failure_recovery=heartbeat
+    die "initial safe heartbeat service failed"
+  fi
 }
+
+initialize_terminal_styles
 
 while (( $# > 0 )); do
   case "$1" in
@@ -695,27 +984,39 @@ read_safe_config_default existing_password_length \
 api_url=${LABGATE_API_URL:-}
 machine_name=${LABGATE_MACHINE_NAME:-$(default_machine_name)}
 password_length=${LABGATE_PASSWORD_LENGTH:-}
-[[ -n ${api_url} ]] || prompt_value api_url 'Pi LabGate API origin' "${existing_api_url}"
-if (( fresh_install == 1 )) && [[ ! ${LABGATE_MACHINE_NAME+x} ]]; then
-  prompt_value machine_name 'Unique machine name' "${machine_name}"
+if [[ -n ${api_url} ]]; then
+  labgate_validate_api_origin "${api_url}" \
+    || die "Pi API must be a canonical origin-only HTTP(S) URL"
+else
+  prompt_validated_value api_url 'Pi LabGate API origin' "${existing_api_url}" \
+    labgate_validate_api_origin \
+    'enter a canonical origin such as https://raspberrypi.example.ts.net without spaces or a trailing slash'
 fi
-[[ -n ${password_length} ]] \
-  || prompt_value password_length 'Guest password length' "${existing_password_length}"
-
-labgate_validate_api_origin "${api_url}" \
-  || die "Pi API must be a canonical origin-only HTTP(S) URL"
-[[ ${machine_name} =~ ^[A-Za-z0-9._\ -]{1,64}$ ]] \
+if (( fresh_install == 1 )) && [[ ! ${LABGATE_MACHINE_NAME+x} ]]; then
+  prompt_validated_value machine_name 'Unique machine name' "${machine_name}" \
+    validate_machine_name \
+    'machine name must be 1-64 characters using letters, numbers, spaces, dot, underscore, or hyphen'
+fi
+validate_machine_name "${machine_name}" \
   || die "machine name contains unsupported characters"
-[[ ${password_length} =~ ^[0-9]{1,3}$ \
-  && 10#${password_length} -ge 8 && 10#${password_length} -le 128 ]] \
-  || die "guest password length must be between 8 and 128"
+if [[ -n ${password_length} ]]; then
+  validate_password_length "${password_length}" \
+    || die "guest password length must be between 8 and 128"
+else
+  prompt_validated_value password_length \
+    'Guest password length (8-128; normally 8)' "${existing_password_length}" \
+    validate_password_length \
+    'guest password length must be a whole number between 8 and 128; use 8 unless the Pi is configured differently'
+fi
 if (( fresh_install == 1 )); then
   registration_secret=${provided_registration_secret}
   provided_registration_secret=
-  [[ -n ${registration_secret} ]] \
-    || prompt_secret registration_secret 'Machine registration secret'
-  labgate_validate_registration_secret "${registration_secret}" \
-    || die "registration secret is not a valid 20-256 character RFC 6750 b64token"
+  if [[ -n ${registration_secret} ]]; then
+    labgate_validate_registration_secret "${registration_secret}" \
+      || die "registration secret is not a valid 20-256 character RFC 6750 b64token"
+  else
+    prompt_registration_secret
+  fi
 fi
 provided_registration_secret=
 
@@ -723,10 +1024,17 @@ tailscale_state='already connected'
 tailscale_auth_key=${provided_tailscale_auth_key}
 provided_tailscale_auth_key=
 if [[ -n ${tailscale_auth_key} ]]; then
-  tailscale_state='auth key supplied; connection will be verified'
+  if tailscale_is_connected; then
+    tailscale_state='already connected; supplied auth key will not be used'
+  else
+    tailscale_state='installation or tailnet login required; auth key supplied (hidden)'
+  fi
 elif ! tailscale_is_connected; then
   tailscale_state='installation or tailnet login required'
   prompt_secret tailscale_auth_key 'Tailscale auth key' 1
+  if [[ -n ${tailscale_auth_key} ]]; then
+    tailscale_state='installation or tailnet login required; auth key supplied (hidden)'
+  fi
 fi
 authorized_keys=$(provisioner_authorized_keys_path) \
   || die "could not determine the provisioner authorized_keys path"
@@ -744,9 +1052,14 @@ else
     [[ -f ${public_key_file} && ! -L ${public_key_file} ]] \
       || die "provisioner public-key input file is unsafe"
   else
-    prompt_value public_key_line 'Paste the Pi provisioner Ed25519 public key'
-    validate_public_key_line "${public_key_line}" \
-      || die "provisioner public key must be one plain ssh-ed25519 key"
+    while true; do
+      prompt_value public_key_line 'Paste the Pi provisioner Ed25519 public key'
+      if validate_public_key_line "${public_key_line}"; then
+        break
+      fi
+      public_key_line=
+      print_input_error 'paste exactly one plain ssh-ed25519 public-key line from the Pi'
+    done
     new_runtime_file public_key_file
     printf '%s\n' "${public_key_line}" >"${public_key_file}"
     public_key_line=
@@ -770,18 +1083,18 @@ else
   registration_summary='not required for an existing identity'
   machine_summary='existing registered endpoint (name unchanged)'
 fi
-printf '\nLabGate physical machine installer\n'
-printf '%-20s %s\n' 'Mode:' "${install_mode}"
-printf '%-20s %s\n' 'Source revision:' "${source_revision}"
-printf '%-20s %s\n' 'Target OS:' "${os_support}"
-printf '%-20s %s\n' 'Machine:' "${machine_summary}"
-printf '%-20s %s\n' 'Pi API:' "${api_url}"
-printf '%-20s %s\n' 'Pi preflight:' 'health and enrollment compatibility will be checked'
-printf '%-20s %s\n' 'Password length:' "${password_length}"
-printf '%-20s %s\n' 'Tailscale:' "${tailscale_state}"
-printf '%-20s %s\n' 'Provisioner key:' "${key_fingerprint}"
-printf '%-20s %s\n' 'Registration key:' "${registration_summary}"
-printf '\nPlanned changes:\n'
+print_heading 'LabGate physical machine installer'
+print_preview_row 'Mode:' "${install_mode}"
+print_preview_row 'Source revision:' "${source_revision}"
+print_preview_row 'Target OS:' "${os_support}"
+print_preview_row 'Machine:' "${machine_summary}"
+print_preview_row 'Pi API:' "${api_url}"
+print_preview_row 'Pi preflight:' 'health and enrollment compatibility will be checked'
+print_preview_row 'Password length:' "${password_length}"
+print_preview_row 'Tailscale:' "${tailscale_state}"
+print_preview_row 'Provisioner key:' "${key_fingerprint}"
+print_preview_row 'Registration key:' "${registration_summary}"
+print_heading 'Planned changes'
 printf '  1. %s\n' "${dependency_plan}"
 printf '  2. Connect this endpoint to Tailscale.\n'
 printf '  3. Verify the Pi health endpoint and enrollment protocol v%s.\n' \
@@ -795,7 +1108,9 @@ if (( needs_public_key == 1 )); then
 fi
 
 if (( dry_run == 1 )); then
-  printf '\nDry run complete; no host or Pi state was changed.\n'
+  printf '\n%bDry run complete;%b no host or Pi state was changed.\n' \
+    "${style_success}" "${style_reset}"
+  [[ -z ${style_success} ]] || stdout_style_used=1
   exit 0
 fi
 
@@ -804,7 +1119,10 @@ fi
 if ! exec 3<>/dev/tty 2>/dev/null; then
   die "interactive confirmation requires an administrator terminal"
 fi
-printf '\nContinue? [y/N]: ' >&3
+initialize_prompt_styles
+printf '\n%bContinue? [y/N]:%b ' \
+  "${prompt_style_warning}" "${prompt_style_reset}" >&3
+[[ -z ${prompt_style_warning} ]] || prompt_style_used=1
 IFS= read -r confirmation <&3 || die "could not read confirmation"
 exec 3>&-
 case "${confirmation}" in
@@ -812,58 +1130,63 @@ case "${confirmation}" in
   *) die "installation cancelled" ;;
 esac
 
-printf '\n[1/8] Installing %s prerequisites\n' "${os_family_label}"
+print_stage 1 "Installing ${os_family_label} prerequisites"
 install_platform_dependencies
 validate_public_key_file_shape "${public_key_file}" \
   || die "provisioner public key must be one plain ssh-ed25519 key"
 key_fingerprint=$(public_key_fingerprint "${public_key_file}") \
   || die "provisioner public key must be one valid Ed25519 key"
+if [[ ${os_family} == ubuntu ]]; then
+  print_stage_success 'Ubuntu prerequisites installed.'
+else
+  print_stage_success 'Arch prerequisites installed and the full upgrade completed.'
+fi
 
-printf '[2/8] Verifying clock synchronization and administrator SSH\n'
+print_stage 2 'Verifying clock synchronization and administrator SSH'
 ensure_clock_and_ssh
+print_stage_success 'Clock synchronized; administrator SSH is active and valid.'
 
-printf '[3/8] Connecting the endpoint to Tailscale\n'
+print_stage 3 'Connecting the endpoint to Tailscale'
 ensure_tailscale
 tailscale_ip=$(timeout --signal=KILL 5 tailscale ip -4 | sed -n '1p')
 validate_tailscale_ipv4 "${tailscale_ip}" \
   || die "Tailscale did not assign one canonical CGNAT IPv4 address"
+print_stage_success "Tailscale connected at ${tailscale_ip}."
 
-printf '[4/8] Checking the Pi health and enrollment endpoints\n'
+print_stage 4 'Checking the Pi health and enrollment endpoints'
 check_pi_health
+print_stage_success "Pi enrollment API is healthy; protocol v${EXPECTED_ENROLLMENT_VERSION}."
 if (( fresh_install == 1 )); then
   check_registration_readiness
+  print_stage_success 'Registration access accepted.'
+else
+  print_stage_success 'Existing registration identity preserved.'
 fi
 
-printf '[5/8] Preparing the locked provisioner boundary\n'
+print_stage 5 'Preparing the locked provisioner boundary'
 prepare_provisioner
 if (( needs_public_key == 0 )); then
   verify_existing_provisioner_key "${authorized_keys}"
 fi
+print_stage_success 'Locked provisioner boundary prepared.'
 
-printf '[6/8] Applying the hardened LabGate machine setup\n'
+print_stage 6 'Applying the hardened LabGate machine setup'
 run_hardened_setup
+print_stage_success 'Guest, PAM, Polkit, sudoers, SSH, and timer policy applied.'
 
-printf '[7/8] Publishing the key last and sending a safe heartbeat\n'
+print_stage 7 'Publishing the key last and sending a safe heartbeat'
 if (( needs_public_key == 1 )); then
   install_provisioner_key
 fi
 verify_installation
-
-printf '[8/8] Verifying the Pi endpoint after installation\n'
-check_pi_health
-
-printf '\nLabGate machine installation complete\n'
-printf '%-24s %s\n' 'Machine:' "${machine_summary}"
-printf '%-24s %s\n' 'Pi enrollment API:' "healthy; protocol v${EXPECTED_ENROLLMENT_VERSION}"
-if (( fresh_install == 1 )); then
-  printf '%-24s %s\n' 'Registration access:' 'accepted'
+if (( needs_public_key == 1 )); then
+  print_stage_success 'Provisioner key published; initial safe heartbeat service completed.'
 else
-  printf '%-24s %s\n' 'Registered identity:' 'preserved'
+  print_stage_success 'Provisioner key preserved; initial safe heartbeat service completed.'
 fi
-printf '%-24s %s\n' 'Tailscale address:' "${tailscale_ip}"
-printf '%-24s %s\n' 'SSH host-key pin:' "$(<"${CONFIG_DIRECTORY}/ssh-host-key-sha256")"
-printf '%-24s %s\n' 'Provisioner key:' "${key_fingerprint}"
-printf '%-24s %s\n' 'Guest account:' 'locked'
-printf '%-24s %s\n' 'Lifecycle timers:' 'enabled and active'
-printf '\nThe initial safe heartbeat was attempted. Confirm the machine becomes\n'
-printf 'available in the LabGate dashboard, then complete the physical Phase 8 checks.\n'
+
+print_stage 8 'Verifying the Pi endpoint after installation'
+check_pi_health
+print_stage_success "Pi endpoint remains healthy; protocol v${EXPECTED_ENROLLMENT_VERSION}."
+
+print_completion_summary "$(<"${CONFIG_DIRECTORY}/ssh-host-key-sha256")"
