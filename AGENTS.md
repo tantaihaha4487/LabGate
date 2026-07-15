@@ -35,7 +35,13 @@ labgate/
 ├── README.md
 ├── docs/
 │   ├── README.md
-│   └── operations/
+│   ├── configuration.md
+│   ├── deployment.md
+│   ├── install-lab-machine.md
+│   ├── install-pi.md
+│   ├── pi-uninstall.md
+│   ├── recovery.md
+│   └── uninstall.md
 ├── docker-compose.yml
 ├── .env.example
 ├── app/

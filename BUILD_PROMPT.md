@@ -302,8 +302,8 @@ and active-after-deadline preservation.
 
 ## Phase 8 — Physical end-to-end validation
 
-Follow the physical acceptance checks in `docs/operations/operations-and-recovery.md`
-on a non-production physical Ubuntu Desktop machine.
+Follow the physical acceptance checks in `docs/recovery.md`
+on a non-production physical Ubuntu or Arch-family desktop machine.
 At minimum prove:
 
 - exact password length and one-time display;
@@ -331,9 +331,10 @@ Phase 8 in `PROGRESS.md` until every physical safety case passes.
 ## Documentation and deployment gate
 
 - `README.md` explains the lifecycle without contradicting the runbooks.
-- `docs/README.md` and `docs/operations/` cover configuration, backup/preflight/migrations,
-  commit-push-Pi-pull deployment, machine updates, PAM maintenance, recovery,
-  state/outbox/log inspection, security checks, and rollback.
+- `docs/README.md` and the flat `docs/*.md` guides cover configuration,
+  backup/preflight/migrations, commit-push-Pi-pull deployment, machine updates,
+  PAM maintenance, recovery, state/outbox/log inspection, security checks, and
+  rollback.
 - physical acceptance is tracked through the operator guides and `PROGRESS.md`.
 - Project changes are made and committed on the development machine, pushed,
   and then pulled with `git pull --ff-only` in `~/LabGate` on the Pi. Do not edit

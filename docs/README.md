@@ -1,26 +1,33 @@
 # LabGate documentation
 
-This is the documentation hub for operators and contributors.
+Short operator guides for the Pi application and the physical lab machines.
+Follow the path for a new installation, or jump directly to the procedure for
+the current maintenance task.
 
-## Operator guides
+[Docs home](README.md) · [Pi install](install-pi.md) · [Lab machine install](install-lab-machine.md)
 
-Follow these guides in order for a new deployment:
+## Operator path
 
-1. [Install the Raspberry Pi](operations/pi-install.md)
-2. [Configure OAuth, HTTPS, and runtime secrets](operations/configuration.md)
-3. [Enroll a lab machine](operations/lab-machine-enrollment.md)
-4. [Deploy updates](operations/deployment.md)
-5. [Operate and recover](operations/operations-and-recovery.md)
-6. [Uninstall or decommission](operations/uninstall.md)
-7. [Remove the Pi application](operations/pi-uninstall.md)
+1. [Install the Raspberry Pi](install-pi.md) — host, Docker Compose, Tailscale,
+   and the provisioning key.
+2. [Configure the application](configuration.md) — OAuth, HTTPS, environment
+   variables, protected secrets, and the recovery sweep.
+3. [Install a lab machine](install-lab-machine.md) — Ubuntu or Arch-family
+   prerequisites, setup, enrollment, and safe updates.
+4. [Deploy a release](deployment.md) — backup, migration, health checks, and
+   rollback.
+5. [Recover and accept](recovery.md) — lifecycle evidence, local safety checks,
+   troubleshooting, and physical release gates.
+6. [Decommission the deployment](uninstall.md) — the required staged full
+   removal.
+7. [Remove only the Pi application](pi-uninstall.md) — preserve data and
+   endpoint policy.
 
-The [operations index](operations/README.md) contains the same route with
-short descriptions and backlinks.
+## Project references
 
-## Project documents
-
-- [Build prompt](../BUILD_PROMPT.md)
 - [Project contract](../AGENTS.md)
+- [Build prompt](../BUILD_PROMPT.md)
 - [Progress tracker](../PROGRESS.md)
+- [Configuration template](../.env.example)
 
-[Back to project README](../README.md)
+[Project README](../README.md)
