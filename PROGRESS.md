@@ -87,7 +87,7 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   absence of forbidden per-student account creation/deletion commands.
 - [x] Add and validate distro-aware one-shot dependency bootstrap for Ubuntu
   Desktop and Arch-family desktops, including EndeavourOS with SDDM.
-- [ ] Prove the colorized one-shot installer contract with automated coverage:
+- [x] Prove the colorized one-shot installer contract with automated coverage:
   forced/automatic/plain output, secret-safe live child rendering, eight ordered
   stages, key-last publication, distro-specific summaries, and safe success or
   failure operator actions; pass the full repository and shell validation gate.
@@ -187,10 +187,15 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   and the uninstall checks; lint, typecheck, Bash syntax, and diff checks also
   passed. The live package/install mutation and twice-run idempotency gate remain
   unchecked.
-- 2026-07-15 colorized installer work resumed from an interrupted uncommitted
-  change set in `install-machine.sh`, its focused tests, and the lab-machine
-  installation guide. The automated colorization gate above remains unchecked
-  until every named command passes; no physical-install evidence is inferred.
+- 2026-07-15 colorized installer gate: forced, automatic, `NO_COLOR`,
+  `TERM=dumb`, and plain output tests cover per-stream styles, resets, prompt
+  validation, live child-output sanitization/redaction, exit-status preservation,
+  eight ordered stages, key-last ordering, and safe success/failure actions.
+  `npm test` passed 105/105 Node tests, all 27 private-namespace machine tests,
+  and uninstall-script tests; `npm run typecheck`, `npm run lint`,
+  `npm run build`, Bash syntax, forbidden account-command scanning, committed
+  and worktree `git diff --check` gates passed. The live twice-run installer and
+  physical acceptance items remain unchecked.
 - Regression coverage includes exact eight-character passwords and invalid
   configuration, atomic checkout conflict, pending expiry after confirmed lock,
   active-session survival past the login deadline, exact close/release,
