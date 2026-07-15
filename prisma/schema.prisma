@@ -23,6 +23,8 @@ enum AuditEvent {
   force_revoke
   heartbeat_timeout
   machine_rekey
+  machine_hide
+  machine_restore
 }
 
 model Machine {
@@ -32,6 +34,7 @@ model Machine {
   sshHostKeySha256       String?           @unique @map("ssh_host_key_sha256")
   webhookToken           String            @unique @map("webhook_token")
   status                 MachineStatus     @default(available)
+  isHidden               Boolean           @default(false) @map("is_hidden")
   lastHeartbeat          DateTime?         @map("last_heartbeat")
   safetyHoldCredentialId String?           @map("safety_hold_credential_id")
   guestCredentials       GuestCredential[]

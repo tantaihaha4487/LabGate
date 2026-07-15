@@ -51,6 +51,37 @@ function validateBearerSecret(name) {
   }
 }
 
+function validateAdminEmails(allowedDomain) {
+  const rawValue = requiredEnvironment("ADMIN_EMAILS");
+  const entries = rawValue.split(",");
+
+  if (entries.some((entry) => entry.trim().length === 0)) {
+    fail("ADMIN_EMAILS must be a comma-separated list without empty entries.");
+  }
+
+  for (const entry of entries) {
+    const email = entry.trim().toLowerCase();
+    const parts = email.split("@");
+    const localPart = parts[0] ?? "";
+
+    if (
+      email.length > 254 ||
+      parts.length !== 2 ||
+      localPart.length === 0 ||
+      localPart.length > 64 ||
+      localPart.includes("..") ||
+      !/^[a-z0-9](?:[a-z0-9.!#$%&'*+/=?^_`{|}~-]*[a-z0-9])?$/i.test(
+        localPart,
+      ) ||
+      parts[1] !== allowedDomain
+    ) {
+      fail(
+        `ADMIN_EMAILS entries must be valid @${allowedDomain} email addresses.`,
+      );
+    }
+  }
+}
+
 function isLoopbackHostname(hostname) {
   if (["localhost", "::1", "[::1]"].includes(hostname.toLowerCase())) {
     return true;
@@ -119,6 +150,8 @@ function validateApplicationEnvironment() {
   ) {
     fail("ALLOWED_EMAIL_DOMAIN must be a valid DNS domain name.");
   }
+
+  validateAdminEmails(allowedDomain);
 
   validateBearerSecret("MACHINE_REGISTRATION_SECRET");
   validateBearerSecret("CRON_SECRET");

@@ -12,7 +12,8 @@ ENV BETTER_AUTH_URL=http://localhost:3000 \
     BETTER_AUTH_SECRET=build-only-placeholder-secret-at-least-32-characters \
     GOOGLE_CLIENT_ID=build-only-placeholder.apps.googleusercontent.com \
     GOOGLE_CLIENT_SECRET=build-only-placeholder \
-    ALLOWED_EMAIL_DOMAIN=ubu.ac.th
+    ALLOWED_EMAIL_DOMAIN=ubu.ac.th \
+    ADMIN_EMAILS=admin@ubu.ac.th
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate && npm run build

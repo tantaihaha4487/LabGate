@@ -1,4 +1,5 @@
 import { configuredGuestPasswordLength } from "@/lib/password-config";
+import { configuredAdminEmails } from "@/lib/admin-emails";
 
 export const DEFAULT_CREDENTIAL_TTL_HOURS = 0.05;
 export const MIN_CREDENTIAL_TTL_HOURS = 1 / 60;
@@ -25,6 +26,7 @@ export function credentialTtlMilliseconds(): number {
 }
 
 export function validateRuntimeConfiguration(): void {
+  configuredAdminEmails();
   configuredGuestPasswordLength();
   credentialTtlMilliseconds();
 }

@@ -24,6 +24,7 @@ chmodSync(looseKeyPath, 0o644);
 after(() => rmSync(keyDirectory, { recursive: true, force: true }));
 
 const validEnvironment = {
+  ADMIN_EMAILS: "admin@ubu.ac.th",
   ALLOWED_EMAIL_DOMAIN: "ubu.ac.th",
   BETTER_AUTH_SECRET: "test-only-better-auth-secret-at-least-32-characters",
   BETTER_AUTH_URL: "http://127.0.0.1:3000",

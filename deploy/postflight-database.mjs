@@ -159,6 +159,7 @@ const expectedTables = {
     tailscale_ip: ["TEXT", 1, null, 0],
     webhook_token: ["TEXT", 1, null, 0],
     status: ["TEXT", 1, "'available'", 0],
+    is_hidden: ["BOOLEAN", 1, "false", 0],
     last_heartbeat: ["DATETIME", 0, null, 0],
     safety_hold_credential_id: ["TEXT", 0, null, 0],
     ssh_host_key_sha256: ["TEXT", 0, null, 0],
@@ -434,6 +435,20 @@ function verifyDataInvariants(database) {
     .get().conflict_rows;
   if (invalidStatuses > 0) {
     fail(`${invalidStatuses} machine row(s) have an invalid lifecycle status.`);
+  }
+
+  const invalidVisibilityValues = database
+    .prepare(
+      `SELECT COUNT(*) AS conflict_rows
+       FROM machines
+       WHERE typeof(is_hidden) <> 'integer'
+          OR is_hidden NOT IN (0, 1)`,
+    )
+    .get().conflict_rows;
+  if (invalidVisibilityValues > 0) {
+    fail(
+      `${invalidVisibilityValues} machine row(s) have a non-Boolean is_hidden value.`,
+    );
   }
 
   const identityConflicts = database
