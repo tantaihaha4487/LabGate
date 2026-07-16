@@ -118,7 +118,7 @@ CRON_SECRET=
 `GUEST_PASSWORD_LENGTH` is exact, not a hint: generated passwords contain exactly
 that many characters. Each machine's root-only `/etc/labgate/password-length` must
 contain the same value; `setup-machine.sh` writes it from
-`LABGATE_PASSWORD_LENGTH`. Both sides reject values outside 8–128.
+`LABGATE_PASSWORD_LENGTH`. Both sides reject values outside 5–128.
 
 `CREDENTIAL_TTL_HOURS` is only the deadline for entering the issued password at the
 physical login screen. A credential that is still `pending` at the deadline is

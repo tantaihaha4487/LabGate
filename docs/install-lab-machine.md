@@ -25,8 +25,8 @@ machine command line.
 
 The target needs an administrator identity, a working display manager, OpenSSH
 Server, PAM, Polkit, systemd, and network access. Ubuntu uses <code>apt</code>. Arch Linux
-and derivatives with <code>ID_LIKE=arch</code> use <code>pacman -Syu</code> because Arch does not
-support partial upgrades.
+and derivatives with <code>ID_LIKE=arch</code> use <code>pacman -S --needed</code> only for
+missing LabGate prerequisites; the installer does not run a full system upgrade.
 
 ## One-shot enrollment
 
@@ -50,8 +50,8 @@ rejected.
 
 Interactive values are validated immediately. A typo is explained and the same
 question is asked again without advancing to secret input or confirmation. The
-password length must be 8-128; use 8 unless the Pi is intentionally configured
-with the same different value. For example, <code>5</code> is rejected and reprompted.
+password length must be 5-128; use 8 unless the Pi is intentionally configured
+with the same different value. For example, <code>4</code> is rejected and reprompted.
 
 Color is enabled automatically on an interactive terminal. Redirected output,
 <code>TERM=dumb</code>, or <code>NO_COLOR</code> produces plain text suitable for logs. Set
@@ -72,7 +72,7 @@ secrets remain hidden.
 $ curl -fsSL https://raw.githubusercontent.com/tantaihaha4487/LabGate/main/machine-setup/install-machine.sh | sudo bash
 Pi LabGate API origin: http://100.64.0.5:3000
 Unique machine name [lab-pc-01]: Lab A - PC 01
-Guest password length (8-128; normally 8) [8]:
+Guest password length (5-128; normally 8) [8]:
 Machine registration secret:
 Tailscale auth key (optional; press Enter to skip):
 Paste the Pi provisioner Ed25519 public key: ssh-ed25519 REDACTED
@@ -154,7 +154,7 @@ Checklist: https://github.com/tantaihaha4487/LabGate/blob/0123456789abcdef012345
 $ curl -fsSL https://raw.githubusercontent.com/tantaihaha4487/LabGate/main/machine-setup/install-machine.sh | sudo bash
 Pi LabGate API origin: https://raspberrypi.example.ts.net
 Unique machine name [lab-pc-02]: Lab A - PC 02
-Guest password length (8-128; normally 8) [8]:
+Guest password length (5-128; normally 8) [8]:
 Machine registration secret:
 Tailscale auth key (optional; press Enter to skip):
 Paste the Pi provisioner Ed25519 public key: ssh-ed25519 REDACTED
@@ -172,7 +172,7 @@ Provisioner key:     SHA256:REDACTED
 Registration key:    supplied (hidden)
 
 Planned changes
-  1. Fully upgrade Arch packages, install fixed prerequisites, and verify clock/SSH.
+  1. Install missing Arch prerequisites without a full system upgrade, then verify clock/SSH.
   2. Connect this endpoint to Tailscale.
   3. Verify the Pi health endpoint and enrollment protocol v1.
   4. Authenticate registration readiness without changing Pi data.
@@ -182,11 +182,8 @@ Planned changes
 Continue? [y/N]: y
 
 [1/8] Installing Arch prerequisites
-| :: Synchronizing package databases...
-| :: Starting full system upgrade...
-| resolving dependencies...
-| ... additional pacman output varies by package and repository state ...
-[OK] Arch prerequisites installed and the full upgrade completed.
+| ... pacman output varies when missing prerequisites are installed ...
+[OK] Arch prerequisites installed; no full system upgrade was run.
 
 [2/8] Verifying clock synchronization and administrator SSH
 [OK] Clock synchronized; administrator SSH is active and valid.

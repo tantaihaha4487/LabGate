@@ -27,7 +27,7 @@ Set every value in <code>.env.local</code>; keep placeholders out of a running d
 | <code>DATABASE_URL</code> | <code>file:./data/labgate.db</code>. |
 | <code>PROVISIONER_SSH_KEY_PATH</code> | <code>/run/secrets/provisioner_key</code> in Compose. |
 | <code>CREDENTIAL_TTL_HOURS</code> | Pending login deadline: <code>0.0166667</code> through <code>24</code>. |
-| <code>GUEST_PASSWORD_LENGTH</code> | Exact generated length: an integer from <code>8</code> through <code>128</code>. |
+| <code>GUEST_PASSWORD_LENGTH</code> | Exact generated length: an integer from <code>5</code> through <code>128</code>. |
 | <code>MACHINE_REGISTRATION_SECRET</code> | A 20–256 character RFC 6750 <code>b64token</code>. |
 | <code>CRON_SECRET</code> | A separate 20–256 character RFC 6750 <code>b64token</code>. |
 

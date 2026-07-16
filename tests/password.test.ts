@@ -25,8 +25,13 @@ test("guest passwords default to eight shell-safe characters and honor the envir
     process.env.GUEST_PASSWORD_LENGTH = "24";
     assert.equal(generateGuestPassword().length, 24);
 
-    process.env.GUEST_PASSWORD_LENGTH = "7";
-    assert.throws(() => generateGuestPassword(), /between 8 and 128/);
+    process.env.GUEST_PASSWORD_LENGTH = "4";
+    assert.throws(() => generateGuestPassword(), /between 5 and 128/);
+
+    process.env.GUEST_PASSWORD_LENGTH = "5";
+    const minimumPassword = generateGuestPassword();
+    assert.equal(minimumPassword.length, 5);
+    assert.equal(isValidGuestPassword(minimumPassword), true);
 
     process.env.GUEST_PASSWORD_LENGTH = "8.5";
     assert.throws(() => generateGuestPassword(), /whole number/);

@@ -159,6 +159,9 @@ do not retry with deleted state.
 | Provisioning failed | The server retries an exact-generation revoke. A failed lock keeps the row unrevoked, immediately expired, held, and occupied. |
 | Display-manager or PAM setup fails | Keep the endpoint out of service. Review the supported GDM, LightDM, or SDDM password stack and its include graph. |
 | A host-key pin changed | Stop provisioning and use the drained authenticated rekey workflow; do not overwrite the marker or POST a new identity. |
+| Arch installer starts a full upgrade or downloads a very large system update | Stop that older installer with `Ctrl-C`; it is not the current behavior. The current installer checks the fixed prerequisite list and installs only missing packages with `pacman -S --needed`. Do not run `pacman -Sy` alone. Preserve the package-manager error; if the sync database is stale, use a separately approved system-maintenance window or install the missing prerequisites manually, then rerun the installer. |
+| Arch prerequisite installation fails | Keep the endpoint out of service and retain the complete pacman output. The installer does not perform a full system upgrade. Verify the missing package names with `pacman -Q`, resolve the package-manager issue under normal OS maintenance policy, and rerun the reviewed installer. |
+| Setup says the Polkit rules directory is not root-owned | Check `sudo stat -c '%A %U:%G %n' /etc/polkit-1/rules.d`. Arch-family systems may use `root:polkitd` with a non-writable mode such as `0750`; that is accepted. A non-root owner or group/other write permission remains a hard failure. |
 
 ## Physical acceptance
 

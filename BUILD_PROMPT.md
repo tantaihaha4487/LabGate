@@ -14,7 +14,7 @@ persists it.
 
 `GUEST_PASSWORD_LENGTH` is exact. The application must generate exactly that
 many unambiguous, shell-safe characters, and the machine must enforce the same
-value from `/etc/labgate/password-length`. Supported values are 8–128.
+value from `/etc/labgate/password-length`. Supported values are 5–128.
 
 `CREDENTIAL_TTL_HOURS` is a pending physical-login deadline:
 
@@ -117,7 +117,7 @@ hosted-domain request hint is missing or forged.
 ## Phase 3 — Checkout and exact password configuration
 
 - Validate `GUEST_PASSWORD_LENGTH` at startup and before generation; reject
-  malformed, fractional, below-8, or above-128 values instead of silently
+  malformed, fractional, below-5, or above-128 values instead of silently
   defaulting.
 - Generate exactly the configured number of characters from the unambiguous
   alphanumeric set.

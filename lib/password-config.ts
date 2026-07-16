@@ -2,7 +2,7 @@ export const PASSWORD_CHARSET =
   "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 export const PASSWORD_PATTERN = /^[A-HJ-NP-Za-km-z2-9]+$/;
 export const DEFAULT_GUEST_PASSWORD_LENGTH = 8;
-export const MIN_GUEST_PASSWORD_LENGTH = 8;
+export const MIN_GUEST_PASSWORD_LENGTH = 5;
 export const MAX_GUEST_PASSWORD_LENGTH = 128;
 
 export function configuredGuestPasswordLength(): number {

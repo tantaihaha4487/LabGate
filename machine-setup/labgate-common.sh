@@ -35,7 +35,7 @@ readonly LABGATE_MAX_PENDING_TTL_SECONDS=86400
 readonly LABGATE_EXPIRY_CLOCK_SKEW_SECONDS=60
 readonly LABGATE_OUTBOX_SEQUENCE_MAX=999999999999999999
 readonly LABGATE_CREDENTIAL_ID_PATTERN='^[A-Za-z0-9_-]{20,64}$'
-readonly LABGATE_PASSWORD_PATTERN='^[A-HJ-NP-Za-km-z2-9]{8,128}$'
+readonly LABGATE_PASSWORD_PATTERN='^[A-HJ-NP-Za-km-z2-9]{5,128}$'
 
 LABGATE_CREDENTIAL_ID=
 LABGATE_CREDENTIAL_EXPIRES_AT=
@@ -484,7 +484,7 @@ labgate_read_password_length() {
   labgate_file_is_root_controlled "${LABGATE_PASSWORD_LENGTH_FILE}" || return 1
   IFS= read -r configured_length <"${LABGATE_PASSWORD_LENGTH_FILE}" || return 1
   [[ ${configured_length} =~ ^[0-9]{1,3}$ ]] || return 1
-  (( 10#${configured_length} >= 8 && 10#${configured_length} <= 128 )) || return 1
+  (( 10#${configured_length} >= 5 && 10#${configured_length} <= 128 )) || return 1
   printf '%s\n' "${configured_length}"
 }
 

@@ -513,10 +513,15 @@ write_state_directly() {
 
 test_issue_validation() {
   reset_fixture || return 1
-  printf '7\n' >/etc/labgate/password-length
-  expect_failure 'password-length configuration below eight' \
+  printf '4\n' >/etc/labgate/password-length
+  expect_failure 'password-length configuration below five' \
     issue_credential "${CREDENTIAL_A}" "${FUTURE}" "${PASSWORD}" || return 1
   [[ ! -e /var/lib/labgate/credential-state ]] || return 1
+
+  printf '5\n' >/etc/labgate/password-length
+  expect_success 'minimum five-character password' \
+    issue_credential "${CREDENTIAL_A}" "${FUTURE}" AbcDE || return 1
+  reset_fixture || return 1
 
   printf '8\n' >/etc/labgate/password-length
   expect_failure 'missing password stdin' \
@@ -1395,7 +1400,7 @@ test_static_polkit_policy() {
     "${setup}" || return 1
   grep -Fq 'installed LabGate Polkit rule differs from the committed artifact' \
     "${setup}" || return 1
-  grep -Fq "$(printf "'%s'" '%u:%g')" "${setup}" || return 1
+  grep -Fq "$(printf "'%s'" '%u')" "${setup}" || return 1
   grep -Fq "$(printf "'%s'" '%a')" "${setup}" || return 1
   grep -Fq 'visudo -c >/dev/null' "${setup}" || return 1
   grep -Fq 'sudo -n -l -U guest' "${setup}" || return 1

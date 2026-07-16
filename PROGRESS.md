@@ -179,9 +179,9 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   modes 0700/0600, returned health `200`, rejected unauthenticated machine data
   with `401`, and emitted the documented CSP, HSTS, anti-framing, and no-store
   headers.
-- 2026-07-15 Arch bootstrap: the one-shot installer now classifies exact Arch
-  and `ID_LIKE=arch` hosts, performs the required full `pacman -Syu` with fixed
-  dependencies, and retains the common hardened setup path. A local dry run on
+- 2026-07-16 Arch bootstrap: the one-shot installer classifies exact Arch and
+  `ID_LIKE=arch` hosts, installs only missing fixed prerequisites with
+  `pacman -S --needed`, and never performs a full system upgrade. A local dry run on
   EndeavourOS/SDDM selected the Arch branch and redacted supplied secrets.
   `npm test` passed 94/94 Node tests, all 27 private-namespace machine tests,
   and the uninstall checks; lint, typecheck, Bash syntax, and diff checks also
@@ -196,8 +196,15 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   `npm run build`, Bash syntax, forbidden account-command scanning, committed
   and worktree `git diff --check` gates passed. The live twice-run installer and
   physical acceptance items remain unchecked.
-- Regression coverage includes exact eight-character passwords and invalid
-  configuration, atomic checkout conflict, pending expiry after confirmed lock,
+- 2026-07-16 installer safety and password-boundary fix: validated interactive
+  prompts now preserve entered values, guest password lengths 5-128 are accepted
+  consistently by the app and machine, and Arch enrollment installs only missing
+  prerequisites with `pacman -S --needed` instead of a full system upgrade.
+  `npm test` passed 105/105 Node tests, all 27 private-namespace machine tests,
+  and uninstall-script tests; typecheck, lint, build, Bash syntax, and diff
+  checks passed. The current host had no LabGate `pacman` process left running.
+- Regression coverage includes exact default eight-character and minimum
+  five-character passwords plus invalid configuration, atomic checkout conflict,
   active-session survival past the login deadline, exact close/release,
   generation conflicts, token rekey races, Ed25519 host pinning, bounded request
   bodies, and fail-secure SSH compensation. Rootless machine coverage exercises

@@ -121,7 +121,7 @@ test("startup preflight exits nonzero for invalid lifecycle configuration", () =
   );
 
   for (const [environment, expectedError] of [
-    [{ GUEST_PASSWORD_LENGTH: "7" }, /GUEST_PASSWORD_LENGTH/],
+    [{ GUEST_PASSWORD_LENGTH: "4" }, /GUEST_PASSWORD_LENGTH/],
     [{ GUEST_PASSWORD_LENGTH: " " }, /GUEST_PASSWORD_LENGTH/],
     [{ CREDENTIAL_TTL_HOURS: "0.001" }, /CREDENTIAL_TTL_HOURS/],
     [{ CREDENTIAL_TTL_HOURS: " " }, /CREDENTIAL_TTL_HOURS/],

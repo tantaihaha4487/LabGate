@@ -19,11 +19,14 @@ test("runtime configuration defaults are explicit and invalid values fail clearl
       DEFAULT_CREDENTIAL_TTL_HOURS * 60 * 60 * 1_000,
     );
 
-    process.env.GUEST_PASSWORD_LENGTH = "7";
+    process.env.GUEST_PASSWORD_LENGTH = "4";
     assert.throws(
       () => validateRuntimeConfiguration(),
-      /GUEST_PASSWORD_LENGTH must be between 8 and 128/,
+      /GUEST_PASSWORD_LENGTH must be between 5 and 128/,
     );
+
+    process.env.GUEST_PASSWORD_LENGTH = "5";
+    assert.doesNotThrow(() => validateRuntimeConfiguration());
 
     process.env.GUEST_PASSWORD_LENGTH = "8";
     process.env.CREDENTIAL_TTL_HOURS = "0";

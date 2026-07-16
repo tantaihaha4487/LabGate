@@ -467,8 +467,12 @@ clock_synchronized=$(timedatectl show --property=NTPSynchronized --value 2>/dev/
 
 [[ -d ${POLKIT_RULES_DIRECTORY} && ! -L ${POLKIT_RULES_DIRECTORY} ]] \
   || die "Polkit rules directory is missing or unsafe: ${POLKIT_RULES_DIRECTORY}"
-[[ $(stat -c '%u:%g' -- "${POLKIT_RULES_DIRECTORY}") == 0:0 ]] \
-  || die "Polkit rules directory must be root-owned"
+# Arch-family polkit commonly uses root:polkitd for this directory. Root
+# ownership plus a non-writable group/other mode keeps the directory root-
+# controlled without requiring a distro-specific group name. The installed
+# LabGate rule below remains strictly root:root 0644.
+[[ $(stat -c '%u' -- "${POLKIT_RULES_DIRECTORY}") == 0 ]] \
+  || die "Polkit rules directory must be owned by root"
 polkit_rules_mode=$(stat -c '%a' -- "${POLKIT_RULES_DIRECTORY}")
 [[ ${polkit_rules_mode} =~ ^[0-7]{3,4}$ ]] \
   && (( (8#${polkit_rules_mode} & 8#022) == 0 )) \
@@ -538,8 +542,8 @@ labgate_validate_api_origin "${api_url}" \
   || die "LABGATE_API_URL must be an origin-only HTTP(S) URL with a canonical hostname or IPv4 address and optional port 1-65535"
 [[ ${machine_name} =~ ^[A-Za-z0-9._\ -]{1,64}$ ]] || die "machine name contains unsupported characters"
 [[ ${password_length} =~ ^[0-9]{1,3}$ ]] \
-  && (( 10#${password_length} >= 8 && 10#${password_length} <= 128 )) \
-  || die "LABGATE_PASSWORD_LENGTH must be between 8 and 128"
+  && (( 10#${password_length} >= 5 && 10#${password_length} <= 128 )) \
+  || die "LABGATE_PASSWORD_LENGTH must be between 5 and 128"
 ssh_host_key_sha256=$(labgate_compute_ssh_host_key_sha256) \
   || die "could not derive the canonical Ed25519 SSH host-key SHA256 fingerprint"
 existing_webhook_token=

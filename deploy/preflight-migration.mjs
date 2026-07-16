@@ -205,10 +205,10 @@ const configuredPasswordLength = process.env.GUEST_PASSWORD_LENGTH;
 if (
   configuredPasswordLength !== undefined &&
   (!/^\d+$/.test(configuredPasswordLength.trim()) ||
-    Number(configuredPasswordLength.trim()) < 8 ||
+    Number(configuredPasswordLength.trim()) < 5 ||
     Number(configuredPasswordLength.trim()) > 128)
 ) {
-  fail("GUEST_PASSWORD_LENGTH must be a whole number between 8 and 128.");
+  fail("GUEST_PASSWORD_LENGTH must be a whole number between 5 and 128.");
 }
 
 const configuredTtl = process.env.CREDENTIAL_TTL_HOURS;

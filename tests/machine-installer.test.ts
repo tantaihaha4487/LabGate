@@ -85,10 +85,12 @@ test("platform classifier accepts Ubuntu, Arch, and Arch derivatives only", () =
   assert.equal(unrelatedSubstring.stdout, "");
 });
 
-test("Arch bootstrap performs a full upgrade with the fixed security dependencies", () => {
+test("Arch bootstrap installs missing prerequisites without a full system upgrade", () => {
   const source = readFileSync(installerPath, "utf8");
 
-  assert.match(source, /pacman -Syu --needed --noconfirm/);
+  assert.match(source, /pacman -S --needed --noconfirm/);
+  assert.doesNotMatch(source, /pacman -Syu/);
+  assert.match(source, /pacman -Q \"\$\{package\}\"/);
   assert.match(source, /IFS= read -r value <\/proc\/sys\/kernel\/hostname/);
   assert.match(source, /machine_name=\$\{LABGATE_MACHINE_NAME:-\$\(default_machine_name\)\}/);
   for (const packageName of [
@@ -248,7 +250,7 @@ test("dry-run prints a redacted enrollment preview without requiring root", () =
           LABGATE_API_URL: "http://100.64.0.5:3000",
           LABGATE_INSTALL_NONINTERACTIVE: "1",
           LABGATE_MACHINE_NAME: "Lab A - PC 01",
-          LABGATE_PASSWORD_LENGTH: "5",
+          LABGATE_PASSWORD_LENGTH: "4",
           LABGATE_PROVISIONER_PUBLIC_KEY_FILE: publicKey,
           LABGATE_REGISTRATION_SECRET: registrationSecret,
           TAILSCALE_AUTH_KEY: tailscaleAuthKey,
@@ -259,8 +261,29 @@ test("dry-run prints a redacted enrollment preview without requiring root", () =
     assert.notEqual(invalidPassword.status, 0);
     assert.match(
       invalidPassword.stderr,
-      /guest password length must be between 8 and 128/,
+      /guest password length must be between 5 and 128/,
     );
+
+    const minimumPassword = spawnSync(
+      installerPath,
+      ["--local", "--dry-run"],
+      {
+        encoding: "utf8",
+        env: {
+          ...baseEnvironment,
+          LABGATE_API_URL: "http://100.64.0.5:3000",
+          LABGATE_INSTALL_NONINTERACTIVE: "1",
+          LABGATE_MACHINE_NAME: "Lab A - PC 01",
+          LABGATE_PASSWORD_LENGTH: "5",
+          LABGATE_PROVISIONER_PUBLIC_KEY_FILE: publicKey,
+          LABGATE_REGISTRATION_SECRET: registrationSecret,
+          TAILSCALE_AUTH_KEY: tailscaleAuthKey,
+        },
+        timeout: 8_000,
+      },
+    );
+    assert.equal(minimumPassword.status, 0, minimumPassword.stderr);
+    assert.match(minimumPassword.stdout, /Password length:\s+5/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -440,7 +463,8 @@ test("installer checks the Pi before local identity changes and publishes the ke
   assert.match(source, /while true; do\n\s+prompt_value value/);
   assert.match(source, /\[OK\] %s/);
   assert.match(source, /Ubuntu prerequisites installed\./);
-  assert.match(source, /Arch prerequisites installed and the full upgrade completed\./);
+  assert.match(source, /Arch prerequisites installed; no full system upgrade was run\./);
+  assert.match(source, /local destination_name=.*prompted_value/);
   assert.match(source, /Locked provisioner boundary prepared\./);
   assert.match(source, /initial safe heartbeat service completed\./);
   assert.match(source, /Required operator actions/);
@@ -483,7 +507,7 @@ test("installation guide contains complete Ubuntu and EndeavourOS transcripts", 
     1,
   );
   assert.equal(
-    [...guide.matchAll(/additional pacman output varies/g)].length,
+    [...guide.matchAll(/pacman output varies when missing prerequisites are installed/g)].length,
     1,
   );
   assert.equal([...guide.matchAll(/^Required operator actions$/gm)].length, 2);

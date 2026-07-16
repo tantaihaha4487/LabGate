@@ -15,6 +15,8 @@ readonly EXPECTED_REGISTRATION_JSON='{"ok":true,"service":"labgate","machineEnro
 readonly PROVISIONER_HOME=/var/lib/labgate-provisioner
 readonly PROVISIONER_SYSUSERS=/etc/sysusers.d/labgate-provisioner.conf
 readonly CONFIG_DIRECTORY=/etc/labgate
+readonly MIN_GUEST_PASSWORD_LENGTH=5
+readonly MAX_GUEST_PASSWORD_LENGTH=128
 
 dry_run=0
 local_source=0
@@ -319,7 +321,7 @@ new_runtime_file() {
 }
 
 prompt_value() {
-  local destination_name=$1 label=$2 default_value=${3:-} value
+  local destination_name=$1 label=$2 default_value=${3:-} prompted_value
 
   [[ ${LABGATE_INSTALL_NONINTERACTIVE:-0} != 1 ]] \
     || die "${label} was not supplied for non-interactive execution"
@@ -336,12 +338,12 @@ prompt_value() {
       "${prompt_style_label}" "${label}" "${prompt_style_reset}" >&3
   fi
   [[ -z ${prompt_style_label} ]] || prompt_style_used=1
-  IFS= read -r value <&3 || die "could not read ${label}"
+  IFS= read -r prompted_value <&3 || die "could not read ${label}"
   exec 3>&-
-  if [[ -z ${value} ]]; then
-    value=${default_value}
+  if [[ -z ${prompted_value} ]]; then
+    prompted_value=${default_value}
   fi
-  printf -v "${destination_name}" '%s' "${value}"
+  printf -v "${destination_name}" '%s' "${prompted_value}"
 }
 
 prompt_validated_value() {
@@ -397,7 +399,8 @@ validate_machine_name() {
 
 validate_password_length() {
   [[ $1 =~ ^[0-9]{1,3}$ ]] \
-    && (( 10#$1 >= 8 && 10#$1 <= 128 ))
+    && (( 10#$1 >= MIN_GUEST_PASSWORD_LENGTH \
+      && 10#$1 <= MAX_GUEST_PASSWORD_LENGTH ))
 }
 
 validate_public_key_line() {
@@ -606,12 +609,21 @@ install_arch_dependencies() {
     inetutils keyutils openssh pam polkit procps-ng sed shadow sudo systemd
     tailscale tar util-linux
   )
+  local -a missing_packages=()
 
   require_command pacman
-  # Arch does not support partial upgrades. Refreshing package databases and
-  # installing prerequisites therefore happens as one full system upgrade.
-  run_child_command pacman -Syu --needed --noconfirm "${packages[@]}" \
-    || die "Arch full upgrade and prerequisite installation failed"
+  # Do not change the user's system-wide package set. Install only packages
+  # that are absent; an administrator may perform a separately approved full
+  # Arch upgrade when the host's package state requires one.
+  for package in "${packages[@]}"; do
+    if ! pacman -Q "${package}" >/dev/null 2>&1; then
+      missing_packages+=("${package}")
+    fi
+  done
+  if (( ${#missing_packages[@]} > 0 )); then
+    run_child_command pacman -S --needed --noconfirm "${missing_packages[@]}" \
+      || die "Arch prerequisite installation failed; no full system upgrade was run"
+  fi
   for package in curl getent hostname keyctl nologin passwd pkaction sshd \
     ssh-keygen systemctl systemd-sysusers tailscale timedatectl visudo; do
     require_command "${package}"
@@ -953,7 +965,7 @@ case "${os_family}" in
   arch)
     os_support="${PRETTY_NAME:-Arch Linux} (Arch family) confirmed"
     os_family_label='Arch'
-    dependency_plan='Fully upgrade Arch packages, install fixed prerequisites, and verify clock/SSH.'
+    dependency_plan='Install missing Arch prerequisites without a full system upgrade, then verify clock/SSH.'
     ;;
   *)
     os_family=unsupported
@@ -1000,12 +1012,12 @@ validate_machine_name "${machine_name}" \
   || die "machine name contains unsupported characters"
 if [[ -n ${password_length} ]]; then
   validate_password_length "${password_length}" \
-    || die "guest password length must be between 8 and 128"
+    || die "guest password length must be between ${MIN_GUEST_PASSWORD_LENGTH} and ${MAX_GUEST_PASSWORD_LENGTH}"
 else
   prompt_validated_value password_length \
-    'Guest password length (8-128; normally 8)' "${existing_password_length}" \
+    'Guest password length (5-128; normally 8)' "${existing_password_length}" \
     validate_password_length \
-    'guest password length must be a whole number between 8 and 128; use 8 unless the Pi is configured differently'
+    'guest password length must be a whole number between 5 and 128; use 8 unless the Pi is configured differently'
 fi
 if (( fresh_install == 1 )); then
   registration_secret=${provided_registration_secret}
@@ -1138,7 +1150,7 @@ key_fingerprint=$(public_key_fingerprint "${public_key_file}") \
 if [[ ${os_family} == ubuntu ]]; then
   print_stage_success 'Ubuntu prerequisites installed.'
 else
-  print_stage_success 'Arch prerequisites installed and the full upgrade completed.'
+  print_stage_success 'Arch prerequisites installed; no full system upgrade was run.'
 fi
 
 print_stage 2 'Verifying clock synchronization and administrator SSH'
