@@ -197,10 +197,14 @@ test("local expiry confirmation revokes only its locked generation", async () =>
     const audit = await db.auditLog.findFirst({
       where: { machineId: machine.id, event: "force_revoke" },
     });
+    const timeoutAudit = await db.auditLog.findFirst({
+      where: { machineId: machine.id, event: "password_timeout" },
+    });
 
     assert.equal(released.status, "available");
     assert.ok(revoked.revokedAt);
     assert.match(audit?.detail ?? "", /local cleanup timer/i);
+    assert.equal(timeoutAudit?.studentEmail, credential.studentEmail);
   } finally {
     await db.auditLog.deleteMany({ where: { machineId: machine.id } });
     await db.guestCredential.deleteMany({ where: { machineId: machine.id } });

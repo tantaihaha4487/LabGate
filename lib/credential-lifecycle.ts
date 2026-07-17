@@ -37,6 +37,7 @@ interface CloseCredentialOptions {
   webhookToken: string;
   now?: Date;
   event: "session_close" | "force_revoke";
+  passwordTimeout?: boolean;
   detail: string;
 }
 
@@ -298,6 +299,7 @@ export async function closeMachineCredential({
   stateVersion,
   now = new Date(),
   event,
+  passwordTimeout = false,
   detail,
   webhookToken,
 }: CloseCredentialOptions): Promise<CredentialClosureStatus> {
@@ -407,6 +409,16 @@ export async function closeMachineCredential({
           detail: detail.slice(0, 500),
         },
       });
+      if (passwordTimeout) {
+        await transaction.auditLog.create({
+          data: {
+            machineId,
+            studentEmail: credential.studentEmail,
+            event: "password_timeout",
+            detail: "The issued password timed out before a physical session opened.",
+          },
+        });
+      }
       return "closed";
     }
 

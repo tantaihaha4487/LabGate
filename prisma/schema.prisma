@@ -15,6 +15,8 @@ enum MachineStatus {
 
 enum AuditEvent {
   login
+  logout
+  password_timeout
   checkout
   provision_ok
   provision_fail
@@ -65,6 +67,8 @@ model AuditLog {
   detail       String?
   createdAt    DateTime   @default(now()) @map("created_at")
   machine      Machine?   @relation(fields: [machineId], references: [id])
+
+  @@index([createdAt, id], map: "audit_log_created_at_id_idx")
 
   @@map("audit_log")
 }

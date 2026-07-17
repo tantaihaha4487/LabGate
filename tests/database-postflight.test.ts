@@ -73,6 +73,74 @@ test("database postflight accepts the complete migrated schema", () => {
   }
 });
 
+test("the upgraded audit migration preserves rows and adds the activity index", () => {
+  const database = new Database(":memory:");
+  const migration = readFileSync(
+    resolve(
+      "prisma/migrations/20260716120000_add_audit_activity_index/migration.sql",
+    ),
+    "utf8",
+  );
+
+  try {
+    database.exec(`
+      CREATE TABLE audit_log (
+        id TEXT NOT NULL PRIMARY KEY,
+        machine_id TEXT,
+        student_email TEXT,
+        event TEXT NOT NULL,
+        detail TEXT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO audit_log (id, student_email, event)
+      VALUES ('legacy-audit-row', 'legacy@ubu.ac.th', 'login');
+    `);
+    database.exec(migration);
+
+    assert.deepEqual(
+      database
+        .prepare("SELECT id, student_email, event FROM audit_log")
+        .get(),
+      {
+        id: "legacy-audit-row",
+        student_email: "legacy@ubu.ac.th",
+        event: "login",
+      },
+    );
+    assert.equal(
+      (
+        database
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'audit_log_created_at_id_idx'",
+          )
+          .get() as { name?: string } | undefined
+      )?.name,
+      "audit_log_created_at_id_idx",
+    );
+  } finally {
+    database.close();
+  }
+});
+
+test("database postflight rejects a missing activity pagination index", () => {
+  const { databasePath, directory } = createMigratedDatabase();
+  const database = new Database(databasePath);
+
+  try {
+    database.exec("DROP INDEX audit_log_created_at_id_idx");
+  } finally {
+    database.close();
+  }
+
+  try {
+    const result = runPostflight(databasePath);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /audit_log_created_at_id_idx/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("machine visibility migration defaults existing rows to visible", () => {
   const database = new Database(":memory:");
   const visibilityMigration = readFileSync(

@@ -166,11 +166,13 @@ audit_log
   id              pk
   machine_id      fk, nullable
   student_email   text, nullable
-  event           enum('login','checkout','provision_ok','provision_fail',
+  event           enum('login','logout','password_timeout','checkout','provision_ok','provision_fail',
                         'session_open','session_close','force_revoke',
-                        'heartbeat_timeout','machine_rekey')
+                        'heartbeat_timeout','machine_rekey','machine_hide',
+                        'machine_restore')
   detail          text, nullable
   created_at      timestamp
+  index           (created_at, id) for stable newest-first activity pagination
 ```
 
 Better Auth's `User`, `Session`, `Account`, and `Verification` models are also in the

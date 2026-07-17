@@ -43,6 +43,7 @@ export async function POST(request: Request) {
     credentialId: report.credentialId,
     stateVersion: report.stateVersion,
     event: "force_revoke",
+    passwordTimeout: true,
     detail:
       "The local cleanup timer confirmed that no guest session was active and the account was locked.",
     webhookToken: machine.webhookToken,

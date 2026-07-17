@@ -127,6 +127,14 @@ export async function finalizeExpiredCredential({
         detail: detail.slice(0, 500),
       },
     });
+    await transaction.auditLog.create({
+      data: {
+        machineId: credential.machineId,
+        studentEmail: credential.studentEmail,
+        event: "password_timeout",
+        detail: "The issued password timed out before a physical session opened.",
+      },
+    });
 
     return {
       status: releasedMachine ? "released" : "held",

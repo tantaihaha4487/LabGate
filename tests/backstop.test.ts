@@ -198,6 +198,9 @@ test("the sweep locks and releases an expired credential when SSH succeeds despi
     const audit = await db.auditLog.findFirst({
       where: { machineId: machine.id, event: "force_revoke" },
     });
+    const timeoutAudit = await db.auditLog.findFirst({
+      where: { machineId: machine.id, event: "password_timeout" },
+    });
 
     assert.equal(revokeCalls, 1);
     assert.equal(result.revokedCredentials, 1);
@@ -207,6 +210,7 @@ test("the sweep locks and releases an expired credential when SSH succeeds despi
     assert.ok(revokedCredential.revokedAt);
     assert.equal(revokedCredential.machineStateVersion, 3);
     assert.match(audit?.detail ?? "", /locked over SSH/);
+    assert.equal(timeoutAudit?.studentEmail, credential.studentEmail);
   } finally {
     await db.auditLog.deleteMany({ where: { machineId: machine.id } });
     await db.guestCredential.deleteMany({ where: { machineId: machine.id } });

@@ -33,12 +33,20 @@ export default async function DashboardLayout({
                 Machines
               </Link>
               {isAdmin ? (
-                <Link
-                  href="/admin"
-                  className="rounded-lg px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
-                >
-                  Admin
-                </Link>
+                <>
+                  <Link
+                    href="/admin"
+                    className="rounded-lg px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                  >
+                    Admin
+                  </Link>
+                  <Link
+                    href="/admin/logs"
+                    className="rounded-lg px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                  >
+                    Activity
+                  </Link>
+                </>
               ) : null}
             </nav>
             <SignOutButton />

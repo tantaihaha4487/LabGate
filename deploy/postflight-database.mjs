@@ -288,6 +288,8 @@ const expectedIndexes = {
     "CREATE INDEX account_userId_idx ON account(userId)",
   verification_identifier_idx:
     "CREATE INDEX verification_identifier_idx ON verification(identifier)",
+  audit_log_created_at_id_idx:
+    "CREATE INDEX audit_log_created_at_id_idx ON audit_log(created_at, id)",
 };
 
 function normalizedSql(sql) {

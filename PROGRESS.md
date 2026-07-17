@@ -32,6 +32,24 @@ are checked.
   complete signed-out, institutional non-admin, and configured-admin manual
   hide/restore acceptance. This does not mark Phase 8 complete.
 
+## Admin login/logout/password-timeout activity tracker
+
+- [x] Add the durable `logout` and attributable `password_timeout` audit events,
+  stable `(created_at, id)` activity index, migration coverage, and database
+  postflight enforcement.
+- [x] Record exactly one attributable web logout after successful Better Auth
+  session deletion without duplicating repeated sign-out attempts.
+- [x] Add an independently authorized, no-store `/api/admin/logs` endpoint with
+  secret-safe web/physical mapping, filters, and opaque cursor pagination.
+- [x] Add the independently authorized `/admin/logs` interface, admin-only
+  navigation, 50-row UTC display, filters, manual refresh, and Older/Newer
+  controls.
+- [x] Pass focused activity tests, clean and upgraded migration checks, Prisma
+  validation/generation, the full test suite, TypeScript, lint, production
+  build, and diff checks.
+- [ ] Manually confirm web and physical login/logout activity after deployment.
+  This does not mark Phase 8 complete.
+
 ## Phase 8 audit tracker
 
 Confirmed lifecycle contract:
@@ -203,6 +221,21 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   `npm test` passed 105/105 Node tests, all 27 private-namespace machine tests,
   and uninstall-script tests; typecheck, lint, build, Bash syntax, and diff
   checks passed. The current host had no LabGate `pacman` process left running.
+- 2026-07-16 logout blank-screen regression fix: display-manager PAM integration
+  now installs an `open_session` hook before the normal stack and a
+  `close_session` hook after `pam_systemd`, while removing both prior single-hook
+  spellings. This keeps logind teardown ahead of synchronous guest cleanup;
+  `npm test` passed 105/105 Node tests, all 27 private-namespace machine tests,
+  and uninstall-script tests, with Bash syntax and diff checks passing. Physical
+  SDDM logout verification remains unchecked.
+- 2026-07-16 activity logging gate: Added the Better Auth session-delete logout
+  hook, attributable pending-password timeout activity, indexed newest-first
+  admin API/page, strict filters/cursors, and no-store secret-safe responses.
+  Clean and upgraded migration checks, missing-index postflight rejection,
+  logout idempotency, timeout mapping, filtering, deterministic pagination,
+  `npm test` (110 Node tests, 27 machine tests, uninstall checks), Prisma
+  validation/generation, TypeScript, lint, production build, and diff checks
+  passed. Manual deployed web/physical activity confirmation remains open.
 - Regression coverage includes exact default eight-character and minimum
   five-character passwords plus invalid configuration, atomic checkout conflict,
   active-session survival past the login deadline, exact close/release,

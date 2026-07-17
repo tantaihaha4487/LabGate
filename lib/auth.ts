@@ -89,6 +89,23 @@ export const auth = betterAuth({
           }
         },
       },
+      delete: {
+        after: async (session) => {
+          const user = await db.user.findUnique({
+            where: { id: session.userId },
+            select: { email: true },
+          });
+
+          if (isAllowedInstitutionEmail(user?.email)) {
+            await db.auditLog.create({
+              data: {
+                studentEmail: user.email,
+                event: "logout",
+              },
+            });
+          }
+        },
+      },
     },
   },
 });
