@@ -112,8 +112,10 @@ test("admin activity API maps attributable events and stays secret-safe", async 
         },
         {
           id: `activity-checkout-${suffix}`,
+          machineId: machine.id,
           studentEmail: webEmail,
           event: "checkout",
+          detail: detailSecret,
           createdAt: new Date(timestamp.getTime() + 6_000),
         },
       ],
@@ -164,14 +166,24 @@ test("admin activity API maps attributable events and stays secret-safe", async 
         id: entry.id,
         source: entry.source,
         action: entry.action,
+        status: entry.status,
         email: entry.email,
         machine: entry.machine,
       })),
       [
         {
+          id: `activity-checkout-${suffix}`,
+          source: "web",
+          action: "checkout",
+          status: "reserved",
+          email: webEmail,
+          machine: { id: machine.id, name: machine.name },
+        },
+        {
           id: `activity-password-timeout-${suffix}`,
           source: "physical",
           action: "timeout",
+          status: "password_timeout",
           email: physicalEmail,
           machine: { id: machine.id, name: machine.name },
         },
@@ -179,6 +191,7 @@ test("admin activity API maps attributable events and stays secret-safe", async 
           id: `activity-physical-close-${suffix}`,
           source: "physical",
           action: "logout",
+          status: "logged_out",
           email: physicalEmail,
           machine: { id: machine.id, name: machine.name },
         },
@@ -186,6 +199,7 @@ test("admin activity API maps attributable events and stays secret-safe", async 
           id: `activity-physical-open-${suffix}`,
           source: "physical",
           action: "login",
+          status: "logged_in",
           email: physicalEmail,
           machine: { id: machine.id, name: machine.name },
         },
@@ -193,6 +207,7 @@ test("admin activity API maps attributable events and stays secret-safe", async 
           id: `activity-web-logout-${suffix}`,
           source: "web",
           action: "logout",
+          status: "logged_out",
           email: webEmail,
           machine: null,
         },
@@ -200,6 +215,7 @@ test("admin activity API maps attributable events and stays secret-safe", async 
           id: `activity-web-login-${suffix}`,
           source: "web",
           action: "login",
+          status: "logged_in",
           email: webEmail,
           machine: null,
         },
@@ -243,6 +259,32 @@ test("admin activity API maps attributable events and stays secret-safe", async 
       [`activity-password-timeout-${suffix}`],
     );
 
+    const checkoutFiltered = await getAdminLogs(
+      adminRequest(
+        `http://localhost/api/admin/logs?source=web&action=checkout&email=${encodeURIComponent(
+          webEmail,
+        )}`,
+        admin.token,
+      ),
+    );
+    assert.equal(checkoutFiltered.status, 200);
+    assert.deepEqual(
+      ((await checkoutFiltered.json()) as {
+        entries: Array<Record<string, unknown>>;
+      }).entries,
+      [
+        {
+          id: `activity-checkout-${suffix}`,
+          source: "web",
+          action: "checkout",
+          status: "reserved",
+          email: webEmail,
+          occurredAt: new Date(timestamp.getTime() + 6_000).toISOString(),
+          machine: { id: machine.id, name: machine.name },
+        },
+      ],
+    );
+
     for (const query of ["source=invalid", "cursor=invalid", "unknown=true"]) {
       const invalid = await getAdminLogs(
         adminRequest(`http://localhost/api/admin/logs?${query}`, admin.token),
@@ -250,7 +292,6 @@ test("admin activity API maps attributable events and stays secret-safe", async 
       assert.equal(invalid.status, 400);
       assert.match(invalid.headers.get("cache-control") ?? "", /no-store/);
     }
-
   } finally {
     await db.auditLog.deleteMany({ where: { id: { contains: suffix } } });
     await db.session.deleteMany({ where: { userId: admin.userId } });
@@ -261,7 +302,7 @@ test("admin activity API maps attributable events and stays secret-safe", async 
   }
 });
 
-test("admin activity pagination is deterministic and duplicate-free", async () => {
+test("admin activity pagination includes reservations deterministically without duplicates", async () => {
   const suffix = randomUUID();
   const admin = await createAdminSession(`page-${suffix}`);
   const createdAt = new Date("2026-07-16T06:00:00.000Z");
@@ -274,14 +315,14 @@ test("admin activity pagination is deterministic and duplicate-free", async () =
       data: ids.map((id, index) => ({
         id,
         studentEmail: `page-${suffix}-${index}@ubu.ac.th`,
-        event: "login" as const,
+        event: "checkout" as const,
         createdAt,
       })),
     });
 
     const first = await getAdminLogs(
       adminRequest(
-        `http://localhost/api/admin/logs?source=web&action=login&email=page-${suffix}`,
+        `http://localhost/api/admin/logs?source=web&action=checkout&email=page-${suffix}`,
         admin.token,
       ),
     );
@@ -295,7 +336,7 @@ test("admin activity pagination is deterministic and duplicate-free", async () =
 
     const second = await getAdminLogs(
       adminRequest(
-        `http://localhost/api/admin/logs?source=web&action=login&email=page-${suffix}&cursor=${encodeURIComponent(
+        `http://localhost/api/admin/logs?source=web&action=checkout&email=page-${suffix}&cursor=${encodeURIComponent(
           firstPayload.nextCursor,
         )}`,
         admin.token,

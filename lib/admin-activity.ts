@@ -4,10 +4,23 @@ import { db } from "@/lib/db/client";
 
 export const ADMIN_ACTIVITY_PAGE_SIZE = 50;
 export const activitySources = ["all", "web", "physical"] as const;
-export const activityActions = ["all", "login", "logout", "timeout"] as const;
+export const activityActions = [
+  "all",
+  "login",
+  "logout",
+  "timeout",
+  "checkout",
+] as const;
+export const activityStatuses = [
+  "reserved",
+  "logged_in",
+  "logged_out",
+  "password_timeout",
+] as const;
 
 export type ActivitySource = (typeof activitySources)[number];
 export type ActivityAction = (typeof activityActions)[number];
+export type ActivityStatus = (typeof activityStatuses)[number];
 
 export interface AdminActivityFilters {
   source: ActivitySource;
@@ -24,6 +37,7 @@ export interface AdminActivityEntry {
   id: string;
   source: Exclude<ActivitySource, "all">;
   action: Exclude<ActivityAction, "all">;
+  status: ActivityStatus;
   email: string;
   occurredAt: string;
   machine: AdminActivityMachine | null;
@@ -48,14 +62,41 @@ interface ActivityCursor {
 }
 
 const activityPairs = [
-  { event: AuditEvent.login, source: "web", action: "login" },
-  { event: AuditEvent.logout, source: "web", action: "logout" },
-  { event: AuditEvent.session_open, source: "physical", action: "login" },
-  { event: AuditEvent.session_close, source: "physical", action: "logout" },
+  {
+    event: AuditEvent.checkout,
+    source: "web",
+    action: "checkout",
+    status: "reserved",
+  },
+  {
+    event: AuditEvent.login,
+    source: "web",
+    action: "login",
+    status: "logged_in",
+  },
+  {
+    event: AuditEvent.logout,
+    source: "web",
+    action: "logout",
+    status: "logged_out",
+  },
+  {
+    event: AuditEvent.session_open,
+    source: "physical",
+    action: "login",
+    status: "logged_in",
+  },
+  {
+    event: AuditEvent.session_close,
+    source: "physical",
+    action: "logout",
+    status: "logged_out",
+  },
   {
     event: AuditEvent.password_timeout,
     source: "physical",
     action: "timeout",
+    status: "password_timeout",
   },
 ] as const;
 
@@ -170,7 +211,7 @@ export function parseAdminActivityQuery(
   }
   if (!isActivityAction(actionValue)) {
     throw new AdminActivityQueryError(
-      "action must be all, login, logout, or timeout.",
+      "action must be all, login, logout, timeout, or checkout.",
     );
   }
 
@@ -247,9 +288,13 @@ export async function listAdminActivity(
         id: row.id,
         source: pair.source,
         action: pair.action,
+        status: pair.status,
         email: row.studentEmail,
         occurredAt: row.createdAt.toISOString(),
-        machine: pair.source === "physical" ? row.machine : null,
+        machine:
+          pair.source === "physical" || pair.action === "checkout"
+            ? row.machine
+            : null,
       },
     ];
   });

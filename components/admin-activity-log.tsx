@@ -28,6 +28,22 @@ function actionLabel(action: AdminActivityEntry["action"]): string {
   if (action === "logout") {
     return "Logout";
   }
+  if (action === "timeout") {
+    return "Password timeout";
+  }
+  return "Checkout";
+}
+
+function statusLabel(status: AdminActivityEntry["status"]): string {
+  if (status === "reserved") {
+    return "Reserved";
+  }
+  if (status === "logged_in") {
+    return "Logged in";
+  }
+  if (status === "logged_out") {
+    return "Logged out";
+  }
   return "Password timeout";
 }
 
@@ -172,11 +188,12 @@ export function AdminActivityLog({
             Operations
           </p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight">
-            Login activity
+            Activity log
           </h1>
           <p className="mt-2 text-sm text-slate-600">
-            Attributable web and physical login/logout/password-timeout events,
-            newest first. All timestamps are UTC.
+            Attributable reservations, web and physical
+            login/logout/password-timeout events, newest first. All timestamps
+            are UTC.
           </p>
         </div>
         <button
@@ -220,6 +237,7 @@ export function AdminActivityLog({
             <option value="login">Login</option>
             <option value="logout">Logout</option>
             <option value="timeout">Password timeout</option>
+            <option value="checkout">Checkout</option>
           </select>
         </label>
         <label className="text-sm font-medium text-slate-700">
@@ -255,9 +273,10 @@ export function AdminActivityLog({
               <tr>
                 <th className="px-4 py-3 font-semibold">Source</th>
                 <th className="px-4 py-3 font-semibold">Action</th>
+                <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Institutional email</th>
                 <th className="px-4 py-3 font-semibold">UTC timestamp</th>
-                <th className="px-4 py-3 font-semibold">Physical machine</th>
+                <th className="px-4 py-3 font-semibold">Machine</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -265,6 +284,7 @@ export function AdminActivityLog({
                 <tr key={entry.id}>
                   <td className="px-4 py-3 text-slate-700">{sourceLabel(entry.source)}</td>
                   <td className="px-4 py-3 font-semibold text-slate-900">{actionLabel(entry.action)}</td>
+                  <td className="px-4 py-3 font-semibold text-slate-900">{statusLabel(entry.status)}</td>
                   <td className="px-4 py-3 text-slate-700">{entry.email}</td>
                   <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-600">
                     {formatTimestamp(entry.occurredAt)}
@@ -274,7 +294,7 @@ export function AdminActivityLog({
               ))}
               {page.entries.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
                     No attributable activity matches these filters.
                   </td>
                 </tr>

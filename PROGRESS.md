@@ -50,6 +50,17 @@ are checked.
 - [ ] Manually confirm web and physical login/logout activity after deployment.
   This does not mark Phase 8 complete.
 
+## Admin reservation-status tracker
+
+- [x] Map existing `checkout` audit rows to additive `status: reserved` entries
+  while preserving the legacy `action` field and separate lifecycle rows.
+- [x] Add checkout filtering and a secret-safe Status column with the four
+  operator-facing values: Reserved, Logged in, Logged out, and Password timeout.
+- [x] Pass focused checkout/status mapping, secret-safety, filtering, and
+  reservation-pagination coverage plus the full repository verification gates.
+- [ ] Manually confirm a deployed reservation row followed by separate physical
+  login/logout or password-timeout rows. This does not mark Phase 8 complete.
+
 ## Phase 8 audit tracker
 
 Confirmed lifecycle contract:
@@ -236,6 +247,15 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   `npm test` (110 Node tests, 27 machine tests, uninstall checks), Prisma
   validation/generation, TypeScript, lint, production build, and diff checks
   passed. Manual deployed web/physical activity confirmation remains open.
+- 2026-07-17 reservation-status gate: Existing checkout audits now appear as
+  secret-safe web `checkout` rows with additive `reserved` status and machine
+  identity; login, logout, physical session, and timeout rows retain separate
+  event-time records with explicit statuses. Checkout filtering and 50-row
+  duplicate-free reservation pagination are covered. `npm test` passed 110/110
+  Node tests, all 27 machine tests, and uninstall checks; Prisma validation and
+  generation, TypeScript, lint, production build, and diff checks passed. No
+  database migration was needed. Manual deployed sequence confirmation remains
+  open.
 - Regression coverage includes exact default eight-character and minimum
   five-character passwords plus invalid configuration, atomic checkout conflict,
   active-session survival past the login deadline, exact close/release,
