@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type {
   ActivityAction,
@@ -77,12 +77,14 @@ export function AdminActivityLog({
   ]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const requestSequence = useRef(0);
 
   async function requestPage(
     filters: AdminActivityFilters,
     cursor: string | undefined,
     nextCursorStack: Array<string | undefined>,
   ) {
+    const sequence = ++requestSequence.current;
     setLoading(true);
     setError(undefined);
 
@@ -121,18 +123,36 @@ export function AdminActivityLog({
         );
       }
 
-      setPage(result);
-      setAppliedFilters(filters);
-      setCursorStack(nextCursorStack);
+      if (sequence === requestSequence.current) {
+        setPage(result);
+        setAppliedFilters(filters);
+        setCursorStack(nextCursorStack);
+      }
     } catch (caught: unknown) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Could not load activity data.",
-      );
+      if (sequence === requestSequence.current) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Could not load activity data.",
+        );
+      }
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) {
+        setLoading(false);
+      }
     }
+  }
+
+  function filtersFromControls(
+    nextSource: ActivitySource,
+    nextAction: ActivityAction,
+  ): AdminActivityFilters {
+    const normalizedEmail = email.trim();
+    return {
+      source: nextSource,
+      action: nextAction,
+      ...(normalizedEmail ? { email: normalizedEmail } : {}),
+    };
   }
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
@@ -213,10 +233,18 @@ export function AdminActivityLog({
         <label className="text-sm font-medium text-slate-700">
           Source
           <select
+            id="activity-source"
+            name="source"
             value={source}
-            onChange={(event) =>
-              setSource(event.target.value as ActivitySource)
-            }
+            onChange={(event) => {
+              const nextSource = event.target.value as ActivitySource;
+              setSource(nextSource);
+              void requestPage(
+                filtersFromControls(nextSource, action),
+                undefined,
+                [undefined],
+              );
+            }}
             className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
           >
             <option value="all">All sources</option>
@@ -227,10 +255,18 @@ export function AdminActivityLog({
         <label className="text-sm font-medium text-slate-700">
           Action
           <select
+            id="activity-action"
+            name="action"
             value={action}
-            onChange={(event) =>
-              setAction(event.target.value as ActivityAction)
-            }
+            onChange={(event) => {
+              const nextAction = event.target.value as ActivityAction;
+              setAction(nextAction);
+              void requestPage(
+                filtersFromControls(source, nextAction),
+                undefined,
+                [undefined],
+              );
+            }}
             className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2"
           >
             <option value="all">All actions</option>
@@ -243,6 +279,8 @@ export function AdminActivityLog({
         <label className="text-sm font-medium text-slate-700">
           Institutional email contains
           <input
+            id="activity-email"
+            name="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             maxLength={254}
