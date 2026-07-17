@@ -119,6 +119,15 @@ state cannot clear it.
 
 ## Outbox and PAM recovery
 
+The selected display-manager PAM file intentionally contains two LabGate session
+entries: the `open_session` hook is first, before the normal session stack, and
+the `close_session` hook is last, after `pam_systemd`. This lets login prepare a
+fresh guest boundary before the desktop starts while logout lets logind release
+the session and `/run/user/<guest UID>` before LabGate performs its synchronous
+lock, process, IPC, and unmount cleanup. Do not collapse these into one hook line
+or move the close hook to the front of the file; that can leave SDDM at a blank
+VT after logout.
+
 The webhook flush worker sends versioned events in persistent sequence order.
 Inspect its timer and journal before touching files:
 

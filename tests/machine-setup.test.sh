@@ -16,6 +16,7 @@ prepare_fixture() {
   mkdir -p \
     "${fixture}/control" \
     "${fixture}/rootfs/etc/labgate" \
+    "${fixture}/rootfs/etc/pam.d" \
     "${fixture}/rootfs/etc/ssh" \
     "${fixture}/rootfs/home/guest" \
     "${fixture}/rootfs/run/labgate" \
@@ -1381,7 +1382,7 @@ test_legacy_outbox_invalid_backlog_fails_closed() {
 }
 
 test_static_polkit_policy() {
-  local actual expected rule setup
+  local actual close_write_line expected open_write_line rule setup
 
   rule=/mnt/source/machine-setup/00-labgate-deny-guest.rules
   setup=/mnt/source/machine-setup/setup-machine.sh
@@ -1418,6 +1419,20 @@ test_static_polkit_policy() {
     "${setup}" || return 1
   grep -Fq 'labgate_prepare_guest_login_authentication' "${setup}" || return 1
   grep -Fq 'systemctl is-enabled guest-webhook-flush.timer' "${setup}" || return 1
+  grep -Fq "readonly PAM_OPEN_HOOK_LINE='session required pam_exec.so quiet type=open_session /usr/local/sbin/guest-session-hook.sh'" \
+    "${setup}" || return 1
+  grep -Fq "readonly PAM_CLOSE_HOOK_LINE='session required pam_exec.so quiet type=close_session /usr/local/sbin/guest-session-hook.sh'" \
+    "${setup}" || return 1
+  grep -Fq "readonly LEGACY_PAM_HOOK_LINE='session required pam_exec.so quiet /usr/local/sbin/guest-session-hook.sh'" \
+    "${setup}" || return 1
+  grep -Fq "readonly LEGACY_PAM_HOOK_NO_QUIET_LINE='session required pam_exec.so /usr/local/sbin/guest-session-hook.sh'" \
+    "${setup}" || return 1
+  grep -Fq 'install_session_hooks "${pam_file}"' "${setup}" || return 1
+  grep -Fq 'display-manager PAM open/close hooks were not installed exactly once' \
+    "${setup}" || return 1
+  open_write_line=$(grep -n -m1 'printf.*PAM_OPEN_HOOK_LINE' "${setup}" | cut -d: -f1) || return 1
+  close_write_line=$(grep -n -m1 'printf.*PAM_CLOSE_HOOK_LINE' "${setup}" | cut -d: -f1) || return 1
+  (( open_write_line < close_write_line )) || return 1
   grep -Fq 'disabled|masked|not-found' "${setup}" || return 1
   grep -Fq 'ssh-keygen -lf "${LABGATE_SSH_HOST_PUBLIC_KEY}" -E sha256' \
     /usr/local/lib/labgate/labgate-common.sh || return 1
@@ -1432,6 +1447,60 @@ test_static_polkit_policy() {
     "${setup}" || return 1
   grep -Fq 'new_temporary_file webhook_curl_config' "${setup}" || return 1
   ! grep -Fq 'new_temporary_file temporary' "${setup}"
+}
+
+test_gdm_smartcard_alternate_policy() {
+  local pam_file
+
+  /usr/bin/find /etc/pam.d -mindepth 1 -delete || return 1
+  for pam_file in \
+    gdm-password \
+    gdm-autologin \
+    gdm-fingerprint \
+    gdm-smartcard-pkcs11-exclusive \
+    gdm-smartcard-sssd-exclusive \
+    gdm-smartcard-sssd-or-password \
+    gdm-launch-environment; do
+    printf 'auth required pam_deny.so\n' >"/etc/pam.d/${pam_file}" || return 1
+  done
+  ln -s gdm-smartcard-sssd-exclusive /etc/pam.d/gdm-smartcard || return 1
+
+  expect_success 'reviewed Ubuntu GDM smart-card services are denied' bash -c '
+    PAM_GUEST_DENY_LINE="account requisite pam_succeed_if.so quiet user != guest"
+    PAM_PROVISIONER_DENY_LINE="account requisite pam_succeed_if.so quiet user != provisioner"
+    die() { printf "%s\n" "$1" >&2; exit 1; }
+    prepend_unique_line() {
+      local destination=$1 line=$2
+      grep -Fqx "${line}" "${destination}" || printf "%s\n" "${line}" >>"${destination}"
+    }
+    eval "$(sed -n "/^install_alternate_display_manager_denials() {/,/^}/p" /mnt/source/machine-setup/setup-machine.sh)"
+    install_alternate_display_manager_denials /etc/pam.d/gdm-password
+  ' || return 1
+
+  [[ -L /etc/pam.d/gdm-smartcard \
+    && $(readlink -f /etc/pam.d/gdm-smartcard) == /etc/pam.d/gdm-smartcard-sssd-exclusive ]] \
+    || return 1
+  for pam_file in \
+    gdm-autologin \
+    gdm-fingerprint \
+    gdm-smartcard-pkcs11-exclusive \
+    gdm-smartcard-sssd-exclusive \
+    gdm-smartcard-sssd-or-password; do
+    [[ $(grep -Fxc 'account requisite pam_succeed_if.so quiet user != guest' "/etc/pam.d/${pam_file}") == 1 \
+      && $(grep -Fxc 'account requisite pam_succeed_if.so quiet user != provisioner' "/etc/pam.d/${pam_file}") == 1 ]] \
+      || return 1
+  done
+
+  printf 'auth required pam_deny.so\n' >/etc/pam.d/gdm-face || return 1
+  expect_failure 'unknown GDM PAM service still fails closed' bash -c '
+    PAM_GUEST_DENY_LINE="account requisite pam_succeed_if.so quiet user != guest"
+    PAM_PROVISIONER_DENY_LINE="account requisite pam_succeed_if.so quiet user != provisioner"
+    die() { printf "%s\n" "$1" >&2; exit 1; }
+    prepend_unique_line() { return 0; }
+    eval "$(sed -n "/^install_alternate_display_manager_denials() {/,/^}/p" /mnt/source/machine-setup/setup-machine.sh)"
+    install_alternate_display_manager_denials /etc/pam.d/gdm-password
+  ' || return 1
+  grep -Fq 'unknown gdm PAM authentication path gdm-face' "${command_stderr}"
 }
 
 run_case() {
@@ -1485,6 +1554,7 @@ run_inner() {
   run_case 'local Ed25519 host-key fingerprints are canonical and root-persisted' test_ssh_host_key_fingerprint_boundary
   run_case 'setup API origins and first-registration secrets fail early' test_setup_configuration_boundaries
   run_case 'Polkit rule and installer boundary match the committed policy' test_static_polkit_policy
+  run_case 'Ubuntu GDM smart-card alternatives are denied and unknown paths fail closed' test_gdm_smartcard_alternate_policy
 
   printf '1..%s\n' "${test_count}"
   if (( failure_count != 0 )); then

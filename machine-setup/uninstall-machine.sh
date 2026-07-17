@@ -8,8 +8,10 @@ readonly COMMON_LIBRARY=/usr/local/lib/labgate/labgate-common.sh
 readonly PAM_DIRECTORY=/etc/pam.d
 readonly CONFIG_DIRECTORY=/etc/labgate
 readonly BOOT_LOCK_SERVICE=guest-boot-lock.service
-readonly PAM_HOOK_LINE='session required pam_exec.so quiet /usr/local/sbin/guest-session-hook.sh'
-readonly LEGACY_PAM_HOOK_LINE='session required pam_exec.so /usr/local/sbin/guest-session-hook.sh'
+readonly PAM_OPEN_HOOK_LINE='session required pam_exec.so quiet type=open_session /usr/local/sbin/guest-session-hook.sh'
+readonly PAM_CLOSE_HOOK_LINE='session required pam_exec.so quiet type=close_session /usr/local/sbin/guest-session-hook.sh'
+readonly LEGACY_PAM_HOOK_LINE='session required pam_exec.so quiet /usr/local/sbin/guest-session-hook.sh'
+readonly LEGACY_PAM_HOOK_NO_QUIET_LINE='session required pam_exec.so /usr/local/sbin/guest-session-hook.sh'
 readonly PAM_GUEST_ACCOUNT_CHANGE_AUTH_LINE='auth requisite pam_exec.so quiet /usr/local/sbin/labgate-deny-guest-account-change.sh'
 readonly PAM_GUEST_ACCOUNT_CHANGE_PASSWORD_LINE='password requisite pam_exec.so quiet /usr/local/sbin/labgate-deny-guest-account-change.sh'
 readonly TIMER_UNITS=(
@@ -160,8 +162,10 @@ discover_pam_files() {
   done
 
   while IFS= read -r -d '' candidate; do
-    if grep -Fqx "${PAM_HOOK_LINE}" "${candidate}" \
-      || grep -Fqx "${LEGACY_PAM_HOOK_LINE}" "${candidate}"; then
+    if grep -Fqx "${PAM_OPEN_HOOK_LINE}" "${candidate}" \
+      || grep -Fqx "${PAM_CLOSE_HOOK_LINE}" "${candidate}" \
+      || grep -Fqx "${LEGACY_PAM_HOOK_LINE}" "${candidate}" \
+      || grep -Fqx "${LEGACY_PAM_HOOK_NO_QUIET_LINE}" "${candidate}"; then
       add_managed_pam_file "${candidate}"
     fi
   done < <(find "${PAM_DIRECTORY}" -xdev -type f -print0)
@@ -191,10 +195,16 @@ remove_lines() {
   [[ -f ${destination} && ! -L ${destination} ]] \
     || die "unsafe PAM file during rewrite: ${destination}"
   temporary=$(mktemp) || die "could not create a PAM rewrite temporary file"
-  awk -v first="${1:-}" -v second="${2:-}" -v third="${3:-}" '
+  awk \
+    -v first="${1:-}" \
+    -v second="${2:-}" \
+    -v third="${3:-}" \
+    -v fourth="${4:-}" \
+    '
     (first == "" || $0 != first) &&
     (second == "" || $0 != second) &&
-    (third == "" || $0 != third) { print }
+    (third == "" || $0 != third) &&
+    (fourth == "" || $0 != fourth) { print }
   ' "${destination}" >"${temporary}" || {
     rm -f -- "${temporary}"
     die "could not rewrite PAM file: ${destination}"
@@ -209,9 +219,10 @@ remove_pam_session_integration() {
 
   for candidate in "${managed_pam_files[@]}"; do
     remove_lines "${candidate}" \
-      "${PAM_HOOK_LINE}" \
+      "${PAM_OPEN_HOOK_LINE}" \
+      "${PAM_CLOSE_HOOK_LINE}" \
       "${LEGACY_PAM_HOOK_LINE}" \
-      ''
+      "${LEGACY_PAM_HOOK_NO_QUIET_LINE}"
   done
 }
 
@@ -219,8 +230,10 @@ verify_pam_integration_removed() {
   local candidate
 
   while IFS= read -r -d '' candidate; do
-    if grep -Fqx "${PAM_HOOK_LINE}" "${candidate}" \
-      || grep -Fqx "${LEGACY_PAM_HOOK_LINE}" "${candidate}"; then
+    if grep -Fqx "${PAM_OPEN_HOOK_LINE}" "${candidate}" \
+      || grep -Fqx "${PAM_CLOSE_HOOK_LINE}" "${candidate}" \
+      || grep -Fqx "${LEGACY_PAM_HOOK_LINE}" "${candidate}" \
+      || grep -Fqx "${LEGACY_PAM_HOOK_NO_QUIET_LINE}" "${candidate}"; then
       die "LabGate PAM integration remains in ${candidate}"
     fi
   done < <(find "${PAM_DIRECTORY}" -xdev -type f -print0)

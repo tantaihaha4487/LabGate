@@ -40,5 +40,14 @@ if grep -En '(^|[^[:alnum:]_])(useradd|userdel|adduser|deluser)([^[:alnum:]_]|$)
   "${PI_SCRIPT}" "${MACHINE_SCRIPT}" >/dev/null; then
   fail 'uninstall scripts contain forbidden account lifecycle commands'
 fi
+grep -Fq "readonly PAM_OPEN_HOOK_LINE='session required pam_exec.so quiet type=open_session /usr/local/sbin/guest-session-hook.sh'" \
+  "${MACHINE_SCRIPT}" \
+  || fail 'machine uninstall does not recognize the open-session hook'
+grep -Fq "readonly PAM_CLOSE_HOOK_LINE='session required pam_exec.so quiet type=close_session /usr/local/sbin/guest-session-hook.sh'" \
+  "${MACHINE_SCRIPT}" \
+  || fail 'machine uninstall does not recognize the close-session hook'
+grep -Fq "readonly LEGACY_PAM_HOOK_NO_QUIET_LINE='session required pam_exec.so /usr/local/sbin/guest-session-hook.sh'" \
+  "${MACHINE_SCRIPT}" \
+  || fail 'machine uninstall does not recognize the old non-quiet hook'
 
 printf 'uninstall script tests passed\n'

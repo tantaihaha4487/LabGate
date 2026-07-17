@@ -7,8 +7,10 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 readonly SCRIPT_DIRECTORY=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 readonly COMMON_INSTALL_DIRECTORY=/usr/local/lib/labgate
 readonly CONFIG_DIRECTORY=/etc/labgate
-readonly PAM_HOOK_LINE='session required pam_exec.so quiet /usr/local/sbin/guest-session-hook.sh'
-readonly LEGACY_PAM_HOOK_LINE='session required pam_exec.so /usr/local/sbin/guest-session-hook.sh'
+readonly PAM_OPEN_HOOK_LINE='session required pam_exec.so quiet type=open_session /usr/local/sbin/guest-session-hook.sh'
+readonly PAM_CLOSE_HOOK_LINE='session required pam_exec.so quiet type=close_session /usr/local/sbin/guest-session-hook.sh'
+readonly LEGACY_PAM_HOOK_LINE='session required pam_exec.so quiet /usr/local/sbin/guest-session-hook.sh'
+readonly LEGACY_PAM_HOOK_NO_QUIET_LINE='session required pam_exec.so /usr/local/sbin/guest-session-hook.sh'
 readonly PAM_GUEST_DENY_LINE='account requisite pam_succeed_if.so quiet user != guest'
 readonly PAM_PROVISIONER_DENY_LINE='account requisite pam_succeed_if.so quiet user != provisioner'
 readonly PAM_GUEST_ACCOUNT_CHANGE_AUTH_LINE='auth requisite pam_exec.so quiet /usr/local/sbin/labgate-deny-guest-account-change.sh'
@@ -156,13 +158,45 @@ remove_known_pam_hooks() {
   local destination=$1 rewritten
 
   [[ -f ${destination} && ! -L ${destination} ]] || return 0
-  if ! grep -Fqx "${PAM_HOOK_LINE}" "${destination}" \
-    && ! grep -Fqx "${LEGACY_PAM_HOOK_LINE}" "${destination}"; then
+  if ! grep -Fqx "${PAM_OPEN_HOOK_LINE}" "${destination}" \
+    && ! grep -Fqx "${PAM_CLOSE_HOOK_LINE}" "${destination}" \
+    && ! grep -Fqx "${LEGACY_PAM_HOOK_LINE}" "${destination}" \
+    && ! grep -Fqx "${LEGACY_PAM_HOOK_NO_QUIET_LINE}" "${destination}"; then
     return 0
   fi
   new_temporary_file rewritten
-  awk -v exact="${PAM_HOOK_LINE}" -v legacy="${LEGACY_PAM_HOOK_LINE}" \
-    '$0 != exact && $0 != legacy { print }' "${destination}" >"${rewritten}"
+  awk \
+    -v open="${PAM_OPEN_HOOK_LINE}" \
+    -v close="${PAM_CLOSE_HOOK_LINE}" \
+    -v legacy="${LEGACY_PAM_HOOK_LINE}" \
+    -v legacy_no_quiet="${LEGACY_PAM_HOOK_NO_QUIET_LINE}" \
+    '$0 != open && $0 != close && $0 != legacy && $0 != legacy_no_quiet { print }' \
+    "${destination}" >"${rewritten}"
+  chown root:root "${rewritten}"
+  chmod --reference="${destination}" "${rewritten}"
+  mv -f -- "${rewritten}" "${destination}"
+}
+
+install_session_hooks() {
+  local destination=$1 rewritten
+
+  # PAM closes session modules in the same configured order as open_session.
+  # Keep preparation before pam_systemd on open, but defer destructive cleanup
+  # until pam_systemd has released the logind session and runtime directory.
+  [[ -f ${destination} && ! -L ${destination} ]] \
+    || die "unsafe or missing PAM file: ${destination}"
+  new_temporary_file rewritten
+  {
+    printf '%s\n' "${PAM_OPEN_HOOK_LINE}"
+    awk \
+      -v open="${PAM_OPEN_HOOK_LINE}" \
+      -v close="${PAM_CLOSE_HOOK_LINE}" \
+      -v legacy="${LEGACY_PAM_HOOK_LINE}" \
+      -v legacy_no_quiet="${LEGACY_PAM_HOOK_NO_QUIET_LINE}" \
+      '$0 != open && $0 != close && $0 != legacy && $0 != legacy_no_quiet { print }' \
+      "${destination}"
+    printf '%s\n' "${PAM_CLOSE_HOOK_LINE}"
+  } >"${rewritten}"
   chown root:root "${rewritten}"
   chmod --reference="${destination}" "${rewritten}"
   mv -f -- "${rewritten}" "${destination}"
@@ -192,23 +226,33 @@ ensure_deny_policy_entry() {
 }
 
 install_alternate_display_manager_denials() {
-  local alternate candidate candidate_name known prefix selected=$1
+  local alternate candidate candidate_name known prefix resolved selected=$1 symlink_targets
   local -a alternates
 
   case "$(basename -- "${selected}")" in
     gdm-password)
       prefix=gdm
-      known='gdm-password gdm-autologin gdm-fingerprint gdm-smartcard gdm-launch-environment'
-      alternates=(gdm-autologin gdm-fingerprint gdm-smartcard)
+      known='gdm-password gdm-autologin gdm-fingerprint gdm-smartcard gdm-smartcard-pkcs11-exclusive gdm-smartcard-sssd-exclusive gdm-smartcard-sssd-or-password gdm-launch-environment'
+      symlink_targets='gdm-smartcard-pkcs11-exclusive gdm-smartcard-sssd-exclusive gdm-smartcard-sssd-or-password'
+      alternates=(
+        gdm-autologin
+        gdm-fingerprint
+        gdm-smartcard
+        gdm-smartcard-pkcs11-exclusive
+        gdm-smartcard-sssd-exclusive
+        gdm-smartcard-sssd-or-password
+      )
       ;;
     lightdm)
       prefix=lightdm
       known='lightdm lightdm-autologin lightdm-greeter'
+      symlink_targets=
       alternates=(lightdm-autologin)
       ;;
     sddm)
       prefix=sddm
       known='sddm sddm-autologin sddm-greeter'
+      symlink_targets=
       alternates=(sddm-autologin)
       ;;
     *)
@@ -230,6 +274,19 @@ install_alternate_display_manager_denials() {
   for alternate in "${alternates[@]}"; do
     candidate=/etc/pam.d/${alternate}
     [[ -e ${candidate} || -L ${candidate} ]] || continue
+    if [[ -L ${candidate} ]]; then
+      [[ ${alternate} == gdm-smartcard && -n ${symlink_targets} ]] \
+        || die "unsafe alternate display-manager PAM symlink: ${candidate}"
+      resolved=$(readlink -f -- "${candidate}" 2>/dev/null || true)
+      [[ ${resolved} == /etc/pam.d/* && ${resolved%/*} == /etc/pam.d \
+        && -f ${resolved} && ! -L ${resolved} ]] \
+        || die "gdm-smartcard must resolve to a reviewed regular PAM service"
+      case " ${symlink_targets} " in
+        *" ${resolved##*/} "*) ;;
+        *) die "gdm-smartcard resolves to an unreviewed PAM service ${resolved##*/}" ;;
+      esac
+      continue
+    fi
     [[ -f ${candidate} && ! -L ${candidate} ]] \
       || die "unsafe alternate display-manager PAM file: ${candidate}"
     prepend_unique_line "${candidate}" "${PAM_GUEST_DENY_LINE}"
@@ -774,11 +831,13 @@ for candidate_pam_file in /etc/pam.d/*; do
   [[ ${candidate_pam_file} == "${pam_file}" ]] && continue
   remove_known_pam_hooks "${candidate_pam_file}"
 done
-prepend_unique_line "${pam_file}" "${PAM_HOOK_LINE}" "${LEGACY_PAM_HOOK_LINE}"
+install_session_hooks "${pam_file}"
 prepend_unique_line "${pam_file}" "${PAM_PROVISIONER_DENY_LINE}"
-[[ $(grep -Fxc "${PAM_HOOK_LINE}" "${pam_file}") == 1 ]] \
-  || die "display-manager PAM hook was not installed exactly once"
+[[ $(grep -Fxc "${PAM_OPEN_HOOK_LINE}" "${pam_file}") == 1 \
+  && $(grep -Fxc "${PAM_CLOSE_HOOK_LINE}" "${pam_file}") == 1 ]] \
+  || die "display-manager PAM open/close hooks were not installed exactly once"
 ! grep -Fqx "${LEGACY_PAM_HOOK_LINE}" "${pam_file}" \
+  && ! grep -Fqx "${LEGACY_PAM_HOOK_NO_QUIET_LINE}" "${pam_file}" \
   || die "legacy display-manager PAM hook remains installed"
 install_alternate_display_manager_denials "${pam_file}"
 pam_auth_visited=()

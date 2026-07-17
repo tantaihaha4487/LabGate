@@ -120,6 +120,9 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   forced/automatic/plain output, secret-safe live child rendering, eight ordered
   stages, key-last publication, distro-specific summaries, and safe success or
   failure operator actions; pass the full repository and shell validation gate.
+- [x] Recognize Ubuntu 24.04 GDM's package-owned smart-card PAM alternatives,
+  deny `guest` and `provisioner` on every alternate path, and prove an unknown
+  GDM path still fails closed before retrying the live enrollment.
 - [ ] Run the installer twice and prove it is idempotent with no duplicate PAM
   entries or sudoers changes.
 - [ ] Prove an issued password has the configured exact length and can log in
@@ -256,6 +259,18 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   generation, TypeScript, lint, production build, and diff checks passed. No
   database migration was needed. Manual deployed sequence confirmation remains
   open.
+- 2026-07-17 Ubuntu 24.04 live enrollment hold: GDM 46.2 on the physical host
+  ships `gdm-smartcard-pkcs11-exclusive`, `gdm-smartcard-sssd-exclusive`, and
+  `gdm-smartcard-sssd-or-password`; the generic `gdm-smartcard` path resolves to
+  the SSSD-exclusive service. Stage 6 failed closed on the first unrecognized
+  package-owned path. `guest-boot-lock.service` is active and `guest` is locked;
+  the endpoint remains out of service pending deployment and a successful
+  installer retry. The reviewed fix validates the generic alternatives symlink,
+  denies both constrained accounts in all three concrete services, and preserves
+  unknown-path rejection. All 28 private-namespace machine tests, uninstall
+  tests, Bash syntax, and diff checks passed. The broader `npm test` run passed
+  the machine-installer file but could not complete two unrelated migration test
+  files because this sandbox denies their child-process execution.
 - Regression coverage includes exact default eight-character and minimum
   five-character passwords plus invalid configuration, atomic checkout conflict,
   active-session survival past the login deadline, exact close/release,
