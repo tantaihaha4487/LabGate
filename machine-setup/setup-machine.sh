@@ -166,11 +166,11 @@ remove_known_pam_hooks() {
   fi
   new_temporary_file rewritten
   awk \
-    -v open="${PAM_OPEN_HOOK_LINE}" \
-    -v close="${PAM_CLOSE_HOOK_LINE}" \
+    -v open_hook="${PAM_OPEN_HOOK_LINE}" \
+    -v close_hook="${PAM_CLOSE_HOOK_LINE}" \
     -v legacy="${LEGACY_PAM_HOOK_LINE}" \
     -v legacy_no_quiet="${LEGACY_PAM_HOOK_NO_QUIET_LINE}" \
-    '$0 != open && $0 != close && $0 != legacy && $0 != legacy_no_quiet { print }' \
+    '$0 != open_hook && $0 != close_hook && $0 != legacy && $0 != legacy_no_quiet { print }' \
     "${destination}" >"${rewritten}"
   chown root:root "${rewritten}"
   chmod --reference="${destination}" "${rewritten}"
@@ -189,11 +189,11 @@ install_session_hooks() {
   {
     printf '%s\n' "${PAM_OPEN_HOOK_LINE}"
     awk \
-      -v open="${PAM_OPEN_HOOK_LINE}" \
-      -v close="${PAM_CLOSE_HOOK_LINE}" \
+      -v open_hook="${PAM_OPEN_HOOK_LINE}" \
+      -v close_hook="${PAM_CLOSE_HOOK_LINE}" \
       -v legacy="${LEGACY_PAM_HOOK_LINE}" \
       -v legacy_no_quiet="${LEGACY_PAM_HOOK_NO_QUIET_LINE}" \
-      '$0 != open && $0 != close && $0 != legacy && $0 != legacy_no_quiet { print }' \
+      '$0 != open_hook && $0 != close_hook && $0 != legacy && $0 != legacy_no_quiet { print }' \
       "${destination}"
     printf '%s\n' "${PAM_CLOSE_HOOK_LINE}"
   } >"${rewritten}"

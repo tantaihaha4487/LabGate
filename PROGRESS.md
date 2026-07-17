@@ -126,6 +126,9 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
 - [x] Make a fresh-enrollment retry recover only the installer-created partial
   `provisioner` `/bin/sh` state by restoring verified `nologin` before setup,
   while keeping unexpected shells and existing authorized keys fail-closed.
+- [x] Use non-keyword AWK variable names for PAM hook rewrites and execute both
+  removal and open/close installation against a real fixture before the next
+  live enrollment retry.
 - [ ] Run the installer twice and prove it is idempotent with no duplicate PAM
   entries or sudoers changes.
 - [ ] Prove an issued password has the configured exact length and can log in
@@ -282,6 +285,12 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   resumes normal hardening. Unexpected shells and existing keys still fail
   closed. The focused machine-installer test, Bash syntax, and diff checks pass;
   live retry remains outstanding.
+- 2026-07-17 Ubuntu AWK compatibility hold: the next live stage-6 retry reached
+  PAM rewriting but Ubuntu AWK rejected the variable name `close` because it is
+  a built-in function. The fix uses `open_hook` and `close_hook`; an executing
+  fixture proves both cleanup and ordered hook installation with the host AWK.
+  All 29 private-namespace machine tests, uninstall tests, Bash syntax, and diff
+  checks pass. The endpoint remains locked and out of service pending live retry.
 - Regression coverage includes exact default eight-character and minimum
   five-character passwords plus invalid configuration, atomic checkout conflict,
   active-session survival past the login deadline, exact close/release,

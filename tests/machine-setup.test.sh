@@ -1430,6 +1430,9 @@ test_static_polkit_policy() {
   grep -Fq 'install_session_hooks "${pam_file}"' "${setup}" || return 1
   grep -Fq 'display-manager PAM open/close hooks were not installed exactly once' \
     "${setup}" || return 1
+  grep -Fq -- '-v open_hook="${PAM_OPEN_HOOK_LINE}"' "${setup}" || return 1
+  grep -Fq -- '-v close_hook="${PAM_CLOSE_HOOK_LINE}"' "${setup}" || return 1
+  ! grep -Eq -- '-v (open|close)=' "${setup}" || return 1
   open_write_line=$(grep -n -m1 'printf.*PAM_OPEN_HOOK_LINE' "${setup}" | cut -d: -f1) || return 1
   close_write_line=$(grep -n -m1 'printf.*PAM_CLOSE_HOOK_LINE' "${setup}" | cut -d: -f1) || return 1
   (( open_write_line < close_write_line )) || return 1
@@ -1447,6 +1450,46 @@ test_static_polkit_policy() {
     "${setup}" || return 1
   grep -Fq 'new_temporary_file webhook_curl_config' "${setup}" || return 1
   ! grep -Fq 'new_temporary_file temporary' "${setup}"
+}
+
+test_pam_hook_rewrite_awk_compatibility() {
+  local pam_file=/etc/pam.d/labgate-hook-rewrite-test
+
+  printf '%s\n' \
+    'session required pam_exec.so quiet type=open_session /usr/local/sbin/guest-session-hook.sh' \
+    'session required pam_exec.so quiet type=close_session /usr/local/sbin/guest-session-hook.sh' \
+    'session required pam_exec.so quiet /usr/local/sbin/guest-session-hook.sh' \
+    'session required pam_exec.so /usr/local/sbin/guest-session-hook.sh' \
+    'auth required pam_deny.so' >"${pam_file}" || return 1
+  chmod 0644 "${pam_file}" || return 1
+
+  expect_success 'PAM hook rewrites use portable AWK variable names' bash -c '
+    PAM_OPEN_HOOK_LINE="session required pam_exec.so quiet type=open_session /usr/local/sbin/guest-session-hook.sh"
+    PAM_CLOSE_HOOK_LINE="session required pam_exec.so quiet type=close_session /usr/local/sbin/guest-session-hook.sh"
+    LEGACY_PAM_HOOK_LINE="session required pam_exec.so quiet /usr/local/sbin/guest-session-hook.sh"
+    LEGACY_PAM_HOOK_NO_QUIET_LINE="session required pam_exec.so /usr/local/sbin/guest-session-hook.sh"
+    die() { printf "%s\n" "$1" >&2; exit 1; }
+    new_temporary_file() {
+      local destination_name=$1 temporary
+      temporary=$(mktemp) || exit 1
+      chmod 0600 "${temporary}" || exit 1
+      printf -v "${destination_name}" "%s" "${temporary}"
+    }
+    eval "$(sed -n "/^remove_known_pam_hooks() {/,/^}/p" /mnt/source/machine-setup/setup-machine.sh)"
+    eval "$(sed -n "/^install_session_hooks() {/,/^}/p" /mnt/source/machine-setup/setup-machine.sh)"
+    remove_known_pam_hooks /etc/pam.d/labgate-hook-rewrite-test
+    [[ $(cat /etc/pam.d/labgate-hook-rewrite-test) == "auth required pam_deny.so" ]] || exit 1
+    printf "%s\n" \
+      "${LEGACY_PAM_HOOK_LINE}" \
+      "auth required pam_deny.so" \
+      "${PAM_CLOSE_HOOK_LINE}" >/etc/pam.d/labgate-hook-rewrite-test
+    install_session_hooks /etc/pam.d/labgate-hook-rewrite-test
+    expected=$(printf "%s\n%s\n%s" \
+      "${PAM_OPEN_HOOK_LINE}" \
+      "auth required pam_deny.so" \
+      "${PAM_CLOSE_HOOK_LINE}")
+    [[ $(cat /etc/pam.d/labgate-hook-rewrite-test) == "${expected}" ]]
+  '
 }
 
 test_gdm_smartcard_alternate_policy() {
@@ -1554,6 +1597,7 @@ run_inner() {
   run_case 'local Ed25519 host-key fingerprints are canonical and root-persisted' test_ssh_host_key_fingerprint_boundary
   run_case 'setup API origins and first-registration secrets fail early' test_setup_configuration_boundaries
   run_case 'Polkit rule and installer boundary match the committed policy' test_static_polkit_policy
+  run_case 'PAM hook rewrites use AWK-compatible names and preserve hook order' test_pam_hook_rewrite_awk_compatibility
   run_case 'Ubuntu GDM smart-card alternatives are denied and unknown paths fail closed' test_gdm_smartcard_alternate_policy
 
   printf '1..%s\n' "${test_count}"
