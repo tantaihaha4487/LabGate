@@ -123,6 +123,9 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
 - [x] Recognize Ubuntu 24.04 GDM's package-owned smart-card PAM alternatives,
   deny `guest` and `provisioner` on every alternate path, and prove an unknown
   GDM path still fails closed before retrying the live enrollment.
+- [x] Make a fresh-enrollment retry recover only the installer-created partial
+  `provisioner` `/bin/sh` state by restoring verified `nologin` before setup,
+  while keeping unexpected shells and existing authorized keys fail-closed.
 - [ ] Run the installer twice and prove it is idempotent with no duplicate PAM
   entries or sudoers changes.
 - [ ] Prove an issued password has the configured exact length and can log in
@@ -271,6 +274,14 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   tests, Bash syntax, and diff checks passed. The broader `npm test` run passed
   the machine-installer file but could not complete two unrelated migration test
   files because this sandbox denies their child-process execution.
+- 2026-07-17 partial-enrollment retry fix: the first failed stage-6 run had
+  already enabled the validated provisioner `/bin/sh` boundary, while key
+  publication had not occurred and the password remained locked. Fresh retry
+  now accepts only that exact root-controlled shell state, proves the password
+  lock and absence of `authorized_keys`, restores verified `nologin`, and then
+  resumes normal hardening. Unexpected shells and existing keys still fail
+  closed. The focused machine-installer test, Bash syntax, and diff checks pass;
+  live retry remains outstanding.
 - Regression coverage includes exact default eight-character and minimum
   five-character passwords plus invalid configuration, atomic checkout conflict,
   active-session survival past the login deadline, exact close/release,

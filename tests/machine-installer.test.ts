@@ -489,6 +489,35 @@ test("installer checks the Pi before local identity changes and publishes the ke
   );
 });
 
+test("fresh retries restore only the exact partial provisioner shell to nologin", () => {
+  const source = readFileSync(installerPath, "utf8");
+  const prepareProvisioner = extractShellFunction(source, "prepare_provisioner");
+  const passwordLock = prepareProvisioner.indexOf("passwd -l provisioner");
+  const keyAbsence = prepareProvisioner.indexOf(
+    "[[ ! -e ${home}/.ssh/authorized_keys && ! -L ${home}/.ssh/authorized_keys ]]",
+  );
+  const restoreNologin = prepareProvisioner.indexOf(
+    "chsh --shell /usr/sbin/nologin provisioner",
+  );
+
+  assert.match(prepareProvisioner, /\$\{shell\} == \/bin\/sh/);
+  assert.match(
+    prepareProvisioner,
+    /fresh provisioner identity has an unexpected login shell/,
+  );
+  assert.match(
+    prepareProvisioner,
+    /partial provisioner shell target must not be group- or world-writable/,
+  );
+  assert.ok(passwordLock >= 0);
+  assert.ok(keyAbsence > passwordLock);
+  assert.ok(restoreNologin > keyAbsence);
+  assert.match(
+    prepareProvisioner,
+    /fresh provisioner identity is not locked behind nologin/,
+  );
+});
+
 test("installation guide contains complete Ubuntu and EndeavourOS transcripts", () => {
   const guide = readFileSync(installerGuidePath, "utf8");
 

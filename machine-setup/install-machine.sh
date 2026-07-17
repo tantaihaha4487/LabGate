@@ -782,7 +782,7 @@ verify_nologin() {
 }
 
 prepare_provisioner() {
-  local gid home mode name record shell uid
+  local gid home mode name nologin_target partial_shell shell shell_mode shell_target uid record
 
   verify_nologin \
     || die "/usr/sbin/nologin is not a safe root-controlled executable"
@@ -810,10 +810,21 @@ prepare_provisioner() {
   mode=$(stat -c '%a' -- "${home}")
   (( (8#${mode} & 8#022) == 0 )) \
     || die "provisioner home must not be group- or world-writable"
+  partial_shell=0
   if (( fresh_install == 1 )); then
-    [[ $(readlink -f -- "${shell}" 2>/dev/null || true) \
-      == $(readlink -f -- /usr/sbin/nologin) ]] \
-      || die "fresh provisioner identity must begin with nologin"
+    nologin_target=$(readlink -f -- /usr/sbin/nologin)
+    shell_target=$(readlink -f -- "${shell}" 2>/dev/null || true)
+    if [[ ${shell_target} != "${nologin_target}" ]]; then
+      [[ ${shell} == /bin/sh && -n ${shell_target} \
+        && ${shell_target} == $(readlink -f -- /bin/sh 2>/dev/null || true) \
+        && -f ${shell_target} && ! -L ${shell_target} && -x ${shell_target} \
+        && $(stat -c '%u' -- "${shell_target}") == 0 ]] \
+        || die "fresh provisioner identity has an unexpected login shell"
+      shell_mode=$(stat -c '%a' -- "${shell_target}")
+      (( (8#${shell_mode} & 8#022) == 0 )) \
+        || die "partial provisioner shell target must not be group- or world-writable"
+      partial_shell=1
+    fi
   fi
   install -d -o "${uid}" -g "${gid}" -m 0700 "${home}/.ssh"
   passwd -l provisioner >/dev/null 2>&1 \
@@ -823,6 +834,13 @@ prepare_provisioner() {
   if (( fresh_install == 1 )); then
     [[ ! -e ${home}/.ssh/authorized_keys && ! -L ${home}/.ssh/authorized_keys ]] \
       || die "fresh provisioner identity already has an authorized key"
+    if (( partial_shell == 1 )); then
+      chsh --shell /usr/sbin/nologin provisioner \
+        || die "could not restore the partial provisioner to nologin"
+    fi
+    shell=$(getent passwd provisioner | awk -F: '{ print $7 }')
+    [[ $(readlink -f -- "${shell}" 2>/dev/null || true) == "${nologin_target}" ]] \
+      || die "fresh provisioner identity is not locked behind nologin"
   fi
 }
 
