@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { useVisiblePolling } from "@/components/use-visible-polling";
 import type {
   ActivityAction,
   AdminActivityEntry,
@@ -78,15 +79,24 @@ export function AdminActivityLog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const requestSequence = useRef(0);
+  const activeRequestCount = useRef(0);
 
   async function requestPage(
     filters: AdminActivityFilters,
     cursor: string | undefined,
     nextCursorStack: Array<string | undefined>,
+    background = false,
   ) {
+    if (background && activeRequestCount.current > 0) {
+      return;
+    }
+
     const sequence = ++requestSequence.current;
-    setLoading(true);
-    setError(undefined);
+    activeRequestCount.current += 1;
+    if (!background) {
+      setLoading(true);
+      setError(undefined);
+    }
 
     try {
       const params = new URLSearchParams({
@@ -129,7 +139,7 @@ export function AdminActivityLog({
         setCursorStack(nextCursorStack);
       }
     } catch (caught: unknown) {
-      if (sequence === requestSequence.current) {
+      if (!background && sequence === requestSequence.current) {
         setError(
           caught instanceof Error
             ? caught.message
@@ -137,11 +147,17 @@ export function AdminActivityLog({
         );
       }
     } finally {
-      if (sequence === requestSequence.current) {
+      activeRequestCount.current -= 1;
+      if (!background && sequence === requestSequence.current) {
         setLoading(false);
       }
     }
   }
+
+  useVisiblePolling(
+    () => requestPage(appliedFilters, undefined, [undefined], true),
+    cursorStack.length === 1,
+  );
 
   function filtersFromControls(
     nextSource: ActivitySource,

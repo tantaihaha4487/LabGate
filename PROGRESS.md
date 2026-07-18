@@ -61,6 +61,27 @@ are checked.
 - [ ] Manually confirm a deployed reservation row followed by separate physical
   login/logout or password-timeout rows. This does not mark Phase 8 complete.
 
+## Near-real-time physical logout tracker
+
+- [x] Wake the existing webhook flush worker from a systemd path unit whenever
+  PAM durably publishes an outbox event, while retaining the 10-second timer as
+  the outage-safe retry backstop.
+- [x] Package, install, enable, verify, quiesce, update, and safely disable the
+  path unit through enrollment and staged decommissioning workflows.
+- [x] Refresh visible student machines, admin machines, and newest admin
+  activity every two seconds without overlapping requests; refresh immediately
+  when a hidden tab becomes visible and keep historical activity pages stable.
+- [x] Prove an accepted physical close transactionally revokes the credential,
+  releases the safe machine, and appears as attributable physical logout
+  activity; pass the full repository, shell, systemd, and production gates.
+- [ ] Deploy the reviewed commit to the Pi, update the physical workstation from
+  that exact commit, and verify the path trigger plus retry timer are enabled
+  and active.
+- [ ] Record a healthy-connectivity physical logout reaching the visible machine
+  and newest activity pages within the next two-second refresh cycle, then prove
+  a webhook outage cannot delay local security and drains in order after
+  connectivity returns. This does not mark Phase 8 complete by itself.
+
 ## Phase 8 audit tracker
 
 Confirmed lifecycle contract:
@@ -291,6 +312,20 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   fixture proves both cleanup and ordered hook installation with the host AWK.
   All 29 private-namespace machine tests, uninstall tests, Bash syntax, and diff
   checks pass. The endpoint remains locked and out of service pending live retry.
+- 2026-07-17 near-real-time physical logout repo gate: a systemd path trigger
+  now wakes the separate ordered webhook worker on durable outbox changes while
+  the 10-second timer remains enabled for retries. Visible student/admin machine
+  pages and only the newest filtered activity page share non-overlapping
+  two-second polling with visibility recovery. `npm test` passed 113/113 Node
+  tests, all 29 private-namespace machine tests, and staged-uninstall checks;
+  Prisma validation/generation, TypeScript, lint, production build, shell syntax,
+  diff checks, and a clean Docker build/probe passed. The isolated image applied
+  all six migrations, returned health 200 and unauthenticated machines 401,
+  passed SQLite integrity, and kept data/database modes 0700/0600. The unit
+  definitions passed `systemd-analyze verify` with an executable fixture; the
+  development host could not inspect the intended root-only installed worker
+  without an interactive sudo password. Pi/workstation rollout and timed
+  healthy/outage physical acceptance remain open, so Phase 8 stays unchecked.
 - Regression coverage includes exact default eight-character and minimum
   five-character passwords plus invalid configuration, atomic checkout conflict,
   active-session survival past the login deadline, exact close/release,

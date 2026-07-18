@@ -56,6 +56,7 @@ Run on the physical lab machine as an administrator:
 # Physical lab machine
 sudo systemctl status guest-boot-lock.service --no-pager
 sudo systemctl list-timers 'guest-*' --all
+sudo systemctl status guest-webhook-flush.path guest-webhook-flush.timer --no-pager
 sudo journalctl -u guest-boot-lock.service -u guest-cleanup.service \
   -u guest-heartbeat.service -u guest-webhook-flush.service --since '-2 hours' --no-pager
 sudo passwd -S guest
@@ -129,20 +130,25 @@ or move the close hook to the front of the file; that can leave SDDM at a blank
 VT after logout.
 
 The webhook flush worker sends versioned events in persistent sequence order.
-Inspect its timer and journal before touching files:
+The path unit watches the outbox directory and starts that worker as soon as PAM
+durably publishes an event. The 10-second timer stays enabled as the independent
+retry backstop; neither trigger runs curl inside PAM or delays local logout.
+Inspect both triggers and the worker journal before touching files:
 
 ~~~sh
 # Physical lab machine
 sudo systemctl is-enabled guest-webhook-flush.timer
 sudo systemctl is-active guest-webhook-flush.timer
+sudo systemctl is-enabled guest-webhook-flush.path
+sudo systemctl is-active guest-webhook-flush.path
 sudo journalctl -u guest-webhook-flush.service --since '-2 hours' --no-pager
 sudo find /var/lib/labgate/outbox -maxdepth 1 -type f -printf '%f\n' | sort
 ~~~
 
 A network outage should leave local lock and cleanup successful while events
-remain queued. Restore Tailscale/API reachability, then let the timer retry. Do
-not manually reorder files, reset the sequence, or put a token in a process
-argument.
+remain queued. Restore Tailscale/API reachability, then let the 10-second timer
+retry. Do not manually reorder files, reset the sequence, start curl from a PAM
+hook, or put a token in a process argument.
 
 If setup reports the legacy clock-named outbox, keep the endpoint drained and
 prove it is locked, session-free, process-free, and unmounted. Then run the
@@ -178,6 +184,35 @@ Run on a non-production physical machine with the dashboard visible. Record
 timestamps, redacted IDs, commands, and pass/fail evidence in
 [PROGRESS.md](../PROGRESS.md). Do not mark acceptance complete from local tests
 alone.
+
+For the near-real-time logout check, keep the student machine page, admin
+machine page, and newest admin activity page visible. Historical activity pages
+do not auto-refresh. Reserve and physically log in, then record a UTC timestamp
+as the desktop logout starts. After the display manager returns, confirm locally
+that `guest` is locked, its session/processes are gone, and `/home/guest` is
+unmounted. Record when both machine pages show `available` and the newest
+activity page shows the attributable physical **Logged out** row. With healthy
+Pi/workstation connectivity, both remote observations must arrive within the
+next completed two-second visible-page refresh cycle.
+
+Repeat once with the Pi application intentionally stopped after the physical
+login and before logout:
+
+~~~sh
+# Pi; declared acceptance maintenance window
+cd ~/LabGate
+docker compose stop labgate
+
+# After local logout evidence and queued outbox evidence are recorded
+docker compose up -d labgate
+curl --fail --silent http://127.0.0.1:3000/api/health
+~~~
+
+Logout must still complete its local security transaction while the API is
+stopped, and the ordered event must remain in the outbox. After the Pi returns,
+leave both machine triggers enabled and confirm the timer drains the event,
+releases the exact safe generation, and adds the physical logout row. Record
+redacted timestamps and outbox filenames, but never a token or password.
 
 Prove all of the following:
 

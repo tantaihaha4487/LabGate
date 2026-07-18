@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { FormEvent } from "react";
+import { useVisiblePolling } from "@/components/use-visible-polling";
 import { normalizeAdminEmail } from "@/lib/admin-email-validation";
 import type {
   AdminMachine,
@@ -122,13 +123,7 @@ export function AdminDashboard({
     }
   }, []);
 
-  useEffect(() => {
-    const refreshInterval = window.setInterval(() => {
-      void loadMachines(true);
-    }, 15_000);
-
-    return () => window.clearInterval(refreshInterval);
-  }, [loadMachines]);
+  useVisiblePolling(() => loadMachines(true));
 
   async function updateVisibility(machine: AdminMachine) {
     const hidden = !machine.isHidden;

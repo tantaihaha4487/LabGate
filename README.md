@@ -57,7 +57,8 @@ The Pi runs Next.js, Better Auth, SQLite/Prisma, and Docker Compose. Machines
 run PAM and systemd lifecycle hooks locally. The <code>provisioner</code> SSH identity is a
 forced-command transport, not a shell; <code>guest</code> cannot use SSH. PAM never makes a
 network call: it completes local safety work, then queues a versioned event in a
-root-controlled outbox for a timer to deliver.
+root-controlled outbox. A systemd path unit wakes the separate delivery worker
+immediately, while a 10-second timer remains the retry backstop.
 
 ## Development
 

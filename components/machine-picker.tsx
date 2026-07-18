@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useVisiblePolling } from "@/components/use-visible-polling";
 
 type MachineStatus = "available" | "occupied";
 type MachineConnectivity = "online" | "offline";
@@ -93,13 +94,7 @@ export function MachinePicker({ initialMachines }: { initialMachines: Machine[] 
     }
   }, []);
 
-  useEffect(() => {
-    const refreshInterval = window.setInterval(() => {
-      void loadMachines(true);
-    }, 15_000);
-
-    return () => window.clearInterval(refreshInterval);
-  }, [loadMachines]);
+  useVisiblePolling(() => loadMachines(true));
 
   useEffect(() => {
     if (!credential) {

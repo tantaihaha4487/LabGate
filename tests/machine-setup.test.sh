@@ -49,6 +49,10 @@ prepare_fixture() {
   install -m 0644 \
     "${REPOSITORY_ROOT}/machine-setup/sshd-labgate-guest.conf" \
     "${fixture}/source/machine-setup/sshd-labgate-guest.conf"
+  install -m 0644 \
+    "${REPOSITORY_ROOT}/machine-setup/guest-webhook-flush.path" \
+    "${REPOSITORY_ROOT}/machine-setup/guest-webhook-flush.timer" \
+    "${fixture}/source/machine-setup/"
   install -m 0755 \
     "${REPOSITORY_ROOT}/machine-setup/setup-machine.sh" \
     "${fixture}/source/machine-setup/setup-machine.sh"
@@ -1418,7 +1422,14 @@ test_static_polkit_policy() {
   grep -Fq 'for auth_failure_module in pam_faillock.so pam_tally2.so pam_tally.so' \
     "${setup}" || return 1
   grep -Fq 'labgate_prepare_guest_login_authentication' "${setup}" || return 1
-  grep -Fq 'systemctl is-enabled guest-webhook-flush.timer' "${setup}" || return 1
+  grep -Fq 'enabled_state=$(systemctl is-enabled "${unit}"' "${setup}" || return 1
+  grep -Fq 'guest-webhook-flush.path guest-webhook-flush.timer' "${setup}" || return 1
+  grep -Fq 'guest-webhook-flush.path guest-webhook-flush.service guest-webhook-flush.timer' \
+    "${setup}" || return 1
+  grep -Fq 'PathChanged=/var/lib/labgate/outbox' \
+    /mnt/source/machine-setup/guest-webhook-flush.path || return 1
+  grep -Fq 'OnUnitActiveSec=10s' \
+    /mnt/source/machine-setup/guest-webhook-flush.timer || return 1
   grep -Fq "readonly PAM_OPEN_HOOK_LINE='session required pam_exec.so quiet type=open_session /usr/local/sbin/guest-session-hook.sh'" \
     "${setup}" || return 1
   grep -Fq "readonly PAM_CLOSE_HOOK_LINE='session required pam_exec.so quiet type=close_session /usr/local/sbin/guest-session-hook.sh'" \

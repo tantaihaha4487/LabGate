@@ -19,6 +19,9 @@ readonly TIMER_UNITS=(
   guest-heartbeat.timer
   guest-webhook-flush.timer
 )
+readonly PATH_UNITS=(
+  guest-webhook-flush.path
+)
 readonly SERVICE_UNITS=(
   guest-cleanup.service
   guest-heartbeat.service
@@ -67,7 +70,7 @@ if (( dry_run == 1 )); then
   printf '%s\n' \
     'Would run local boot-lock recovery and verify guest safety.' \
     'Would back up affected /etc/pam.d files under /root/labgate-uninstall-<timestamp>.' \
-    'Would disable guest-cleanup.timer, guest-heartbeat.timer, and guest-webhook-flush.timer.' \
+    'Would disable guest-cleanup.timer, guest-heartbeat.timer, guest-webhook-flush.path, and guest-webhook-flush.timer.' \
     'Would remove only the display-manager LabGate PAM session hook.' \
     'Would retain the guest passwd/chfn/chsh account-change guards.' \
     'Would retain guest/provisioner accounts, SSH restrictions, boot lock, and LabGate state.'
@@ -253,21 +256,21 @@ verify_guest_account_change_guards() {
 disable_lifecycle_units() {
   local active_state enabled_state unit
 
-  for unit in "${SERVICE_UNITS[@]}"; do
-    systemctl stop "${unit}" >/dev/null 2>&1 || true
-    active_state=$(systemctl is-active "${unit}" 2>/dev/null || true)
-    case "${active_state}" in
-      inactive|failed|unknown|not-found|'') ;;
-      *) die "${unit} remains active" ;;
-    esac
-  done
-  for unit in "${TIMER_UNITS[@]}"; do
+  for unit in "${TIMER_UNITS[@]}" "${PATH_UNITS[@]}"; do
     systemctl disable --now "${unit}" >/dev/null 2>&1 || true
     enabled_state=$(systemctl is-enabled "${unit}" 2>/dev/null || true)
     case "${enabled_state}" in
       disabled|masked|not-found|'') ;;
       *) die "${unit} remains enabled" ;;
     esac
+    active_state=$(systemctl is-active "${unit}" 2>/dev/null || true)
+    case "${active_state}" in
+      inactive|failed|unknown|not-found|'') ;;
+      *) die "${unit} remains active" ;;
+    esac
+  done
+  for unit in "${SERVICE_UNITS[@]}"; do
+    systemctl stop "${unit}" >/dev/null 2>&1 || true
     active_state=$(systemctl is-active "${unit}" 2>/dev/null || true)
     case "${active_state}" in
       inactive|failed|unknown|not-found|'') ;;

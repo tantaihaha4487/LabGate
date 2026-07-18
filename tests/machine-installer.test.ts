@@ -11,6 +11,13 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 const installerPath = resolve("machine-setup/install-machine.sh");
+const setupPath = resolve("machine-setup/setup-machine.sh");
+const webhookFlushPathPath = resolve(
+  "machine-setup/guest-webhook-flush.path",
+);
+const webhookFlushTimerPath = resolve(
+  "machine-setup/guest-webhook-flush.timer",
+);
 const platformPath = resolve("machine-setup/labgate-platform.sh");
 const installerGuidePath = resolve("docs/install-lab-machine.md");
 const provisionerSysusersPath = resolve(
@@ -50,6 +57,42 @@ test("one-shot installer is executable, syntactically valid, and documents its m
   assert.doesNotMatch(
     readFileSync(installerGuidePath, "utf8"),
     /~~~sh\n# (Pi|Physical lab machine)/,
+  );
+});
+
+test("webhook outbox changes wake the worker while the retry timer remains enabled", () => {
+  const installerSource = readFileSync(installerPath, "utf8");
+  const setupSource = readFileSync(setupPath, "utf8");
+  const pathUnit = readFileSync(webhookFlushPathPath, "utf8");
+  const timerUnit = readFileSync(webhookFlushTimerPath, "utf8");
+  const sourceValidation = extractShellFunction(
+    installerSource,
+    "validate_source_tree",
+  );
+  const migrationQuiescence = extractShellFunction(
+    setupSource,
+    "quiesce_legacy_outbox_worker",
+  );
+
+  assert.match(pathUnit, /^\[Path\]$/m);
+  assert.match(pathUnit, /^PathChanged=\/var\/lib\/labgate\/outbox$/m);
+  assert.match(pathUnit, /^Unit=guest-webhook-flush\.service$/m);
+  assert.match(pathUnit, /^WantedBy=multi-user\.target$/m);
+  assert.match(timerUnit, /^OnUnitActiveSec=10s$/m);
+  assert.match(timerUnit, /^Persistent=true$/m);
+  assert.match(timerUnit, /^Unit=guest-webhook-flush\.service$/m);
+
+  assert.match(sourceValidation, /^    guest-webhook-flush\.path$/m);
+  assert.match(setupSource, /guest-webhook-flush\.path guest-webhook-flush\.service guest-webhook-flush\.timer/);
+  assert.match(
+    setupSource,
+    /guest-webhook-flush\.path guest-webhook-flush\.timer\n/,
+  );
+  assert.match(migrationQuiescence, /systemctl disable --now/);
+  assert.match(migrationQuiescence, /guest-webhook-flush\.path guest-webhook-flush\.timer/);
+  assert.match(
+    migrationQuiescence,
+    /guest-webhook-flush\.path guest-webhook-flush\.timer guest-webhook-flush\.service/,
   );
 });
 

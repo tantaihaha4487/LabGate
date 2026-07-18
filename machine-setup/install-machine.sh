@@ -219,7 +219,7 @@ print_completion_summary() {
   print_completion_row 'SSH host-key pin:' "${host_key_pin}"
   print_completion_row 'Provisioner key:' "${key_fingerprint}"
   print_completion_row 'Guest account:' 'locked'
-  print_completion_row 'Lifecycle timers:' 'enabled and active'
+  print_completion_row 'Lifecycle triggers:' 'path and timers enabled and active'
   print_completion_row 'Initial heartbeat:' 'local service completed'
   printf '\n%bRequired operator actions%b\n' \
     "${style_warning}" "${style_reset}"
@@ -459,6 +459,7 @@ validate_source_tree() {
     guest-heartbeat.sh
     guest-heartbeat.timer
     guest-session-hook.sh
+    guest-webhook-flush.path
     guest-webhook-flush.service
     guest-webhook-flush.sh
     guest-webhook-flush.timer
@@ -909,7 +910,8 @@ verify_installation() {
   systemctl is-active --quiet guest-boot-lock.service \
     || die "guest-boot-lock.service is not active"
   for unit in \
-    guest-cleanup.timer guest-heartbeat.timer guest-webhook-flush.timer; do
+    guest-cleanup.timer guest-heartbeat.timer \
+    guest-webhook-flush.path guest-webhook-flush.timer; do
     systemctl is-enabled --quiet "${unit}" \
       || die "${unit} is not enabled"
     systemctl is-active --quiet "${unit}" \
@@ -1131,7 +1133,7 @@ printf '  3. Verify the Pi health endpoint and enrollment protocol v%s.\n' \
 if (( fresh_install == 1 )); then
   printf '  4. Authenticate registration readiness without changing Pi data.\n'
 fi
-printf '  5. Apply the reviewed guest, PAM, Polkit, sudoers, SSH, and timer policy.\n'
+printf '  5. Apply the reviewed guest, PAM, Polkit, sudoers, SSH, and lifecycle-trigger policy.\n'
 if (( needs_public_key == 1 )); then
   printf '  6. Publish the provisioner key only after hardened setup succeeds.\n'
 fi
@@ -1201,7 +1203,7 @@ print_stage_success 'Locked provisioner boundary prepared.'
 
 print_stage 6 'Applying the hardened LabGate machine setup'
 run_hardened_setup
-print_stage_success 'Guest, PAM, Polkit, sudoers, SSH, and timer policy applied.'
+print_stage_success 'Guest, PAM, Polkit, sudoers, SSH, and lifecycle-trigger policy applied.'
 
 print_stage 7 'Publishing the key last and sending a safe heartbeat'
 if (( needs_public_key == 1 )); then

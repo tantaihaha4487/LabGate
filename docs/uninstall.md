@@ -43,7 +43,7 @@ sudo bash machine-setup/uninstall-machine.sh --confirm
 The machine script runs boot-lock recovery and proves <code>guest</code> is locked,
 session-free, process-free, unmounted, and not waiting on local recovery. It
 backs up affected PAM files under
-<code>/root/labgate-uninstall-&lt;timestamp&gt;</code>, disables lifecycle timers, removes
+<code>/root/labgate-uninstall-&lt;timestamp&gt;</code>, disables lifecycle path/timer triggers, removes
 only the display-manager LabGate session hook, retains the account-change guards,
 and verifies the result.
 

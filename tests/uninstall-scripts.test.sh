@@ -32,6 +32,9 @@ grep -Fqx 'Would retain the guest passwd/chfn/chsh account-change guards.' \
 grep -Fqx 'Would retain guest/provisioner accounts, SSH restrictions, boot lock, and LabGate state.' \
   <<<"${machine_output}" \
   || fail 'machine dry-run does not include retained protections'
+grep -Fqx 'Would disable guest-cleanup.timer, guest-heartbeat.timer, guest-webhook-flush.path, and guest-webhook-flush.timer.' \
+  <<<"${machine_output}" \
+  || fail 'machine dry-run does not disable both webhook triggers'
 
 if grep -Fq -- '--volumes' "${PI_SCRIPT}"; then
   fail 'Pi uninstall script can delete Compose volumes'
@@ -49,5 +52,16 @@ grep -Fq "readonly PAM_CLOSE_HOOK_LINE='session required pam_exec.so quiet type=
 grep -Fq "readonly LEGACY_PAM_HOOK_NO_QUIET_LINE='session required pam_exec.so /usr/local/sbin/guest-session-hook.sh'" \
   "${MACHINE_SCRIPT}" \
   || fail 'machine uninstall does not recognize the old non-quiet hook'
+grep -Fq 'readonly PATH_UNITS=(' "${MACHINE_SCRIPT}" \
+  || fail 'machine uninstall has no path-unit disable list'
+grep -Fq 'guest-webhook-flush.path' "${MACHINE_SCRIPT}" \
+  || fail 'machine uninstall does not disable the webhook path trigger'
+trigger_disable_line=$(grep -n -m1 'for unit in "${TIMER_UNITS\[@\]}" "${PATH_UNITS\[@\]}"' \
+  "${MACHINE_SCRIPT}" | cut -d: -f1)
+service_stop_line=$(grep -n -m1 'for unit in "${SERVICE_UNITS\[@\]}"' \
+  "${MACHINE_SCRIPT}" | cut -d: -f1)
+[[ -n ${trigger_disable_line} && -n ${service_stop_line} \
+  && ${trigger_disable_line} -lt ${service_stop_line} ]] \
+  || fail 'machine uninstall must disable triggers before stopping their services'
 
 printf 'uninstall script tests passed\n'

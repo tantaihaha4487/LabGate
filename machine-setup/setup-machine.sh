@@ -44,15 +44,19 @@ quiesce_legacy_outbox_worker() {
   local active_state enabled_state load_state unit
 
   # A failed migration must not reboot into the old clock-ordered worker. Leave
-  # the timer disabled until this installer reaches its normal enable step.
-  systemctl disable --now guest-webhook-flush.timer >/dev/null 2>&1 || true
+  # both triggers disabled until this installer reaches its normal enable step.
+  systemctl disable --now \
+    guest-webhook-flush.path guest-webhook-flush.timer >/dev/null 2>&1 || true
   systemctl stop guest-webhook-flush.service >/dev/null 2>&1 || true
-  enabled_state=$(systemctl is-enabled guest-webhook-flush.timer 2>/dev/null || true)
-  case "${enabled_state}" in
-    disabled|masked|not-found) ;;
-    *) die "guest-webhook-flush.timer remains enabled or its enablement state is unknown" ;;
-  esac
-  for unit in guest-webhook-flush.timer guest-webhook-flush.service; do
+  for unit in guest-webhook-flush.path guest-webhook-flush.timer; do
+    enabled_state=$(systemctl is-enabled "${unit}" 2>/dev/null || true)
+    case "${enabled_state}" in
+      disabled|masked|not-found) ;;
+      *) die "${unit} remains enabled or its enablement state is unknown" ;;
+    esac
+  done
+  for unit in \
+    guest-webhook-flush.path guest-webhook-flush.timer guest-webhook-flush.service; do
     load_state=$(systemctl show "${unit}" --property=LoadState --value 2>/dev/null) \
       || die "could not inspect ${unit} before legacy outbox migration"
     case "${load_state}" in
@@ -803,7 +807,7 @@ account_password_is_locked provisioner \
 for unit in \
   guest-boot-lock.service guest-cleanup.service guest-cleanup.timer \
   guest-heartbeat.service guest-heartbeat.timer \
-  guest-webhook-flush.service guest-webhook-flush.timer; do
+  guest-webhook-flush.path guest-webhook-flush.service guest-webhook-flush.timer; do
   install -o root -g root -m 0644 \
     "${SCRIPT_DIRECTORY}/${unit}" "/etc/systemd/system/${unit}"
 done
@@ -929,7 +933,9 @@ rm -f -- \
   /var/lib/labgate/credential-issued-at \
   /run/labgate/guest-mounted-at \
   "${CONFIG_DIRECTORY}/max-ttl-seconds"
-systemctl enable --now guest-cleanup.timer guest-heartbeat.timer guest-webhook-flush.timer
+systemctl enable --now \
+  guest-cleanup.timer guest-heartbeat.timer \
+  guest-webhook-flush.path guest-webhook-flush.timer
 
 printf 'LabGate machine setup complete for %s (%s); password length is %s.\n' \
   "${machine_name}" "${tailscale_ip}" "${password_length}"

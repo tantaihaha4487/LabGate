@@ -6,6 +6,7 @@ import { POST as heartbeat } from "../app/api/webhook/heartbeat/route";
 import { POST as sessionClose } from "../app/api/webhook/session-close/route";
 import { POST as sessionOpen } from "../app/api/webhook/session-open/route";
 import { db } from "../lib/db/client";
+import { listAdminActivity } from "../lib/admin-activity";
 import { listPublicMachines } from "../lib/machines";
 
 function sshFingerprint(seed: string): string {
@@ -130,6 +131,11 @@ test("machine webhooks activate and close one exact credential generation", asyn
       orderBy: { createdAt: "asc" },
       select: { event: true },
     });
+    const activity = await listAdminActivity({
+      source: "physical",
+      action: "logout",
+      email: credential.studentEmail,
+    });
 
     assert.equal(closed.status, "available");
     assert.ok(revoked.revokedAt);
@@ -137,6 +143,16 @@ test("machine webhooks activate and close one exact credential generation", asyn
       { event: "session_open" },
       { event: "session_close" },
     ]);
+    assert.equal(activity.entries.length, 1);
+    assert.deepEqual(activity.entries[0], {
+      id: activity.entries[0].id,
+      source: "physical",
+      action: "logout",
+      status: "logged_out",
+      email: credential.studentEmail,
+      occurredAt: activity.entries[0].occurredAt,
+      machine: { id: machine.id, name: machine.name },
+    });
   } finally {
     await db.auditLog.deleteMany({ where: { machineId: machine.id } });
     await db.guestCredential.deleteMany({ where: { machineId: machine.id } });

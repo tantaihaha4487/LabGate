@@ -94,7 +94,7 @@ Planned changes
   2. Connect this endpoint to Tailscale.
   3. Verify the Pi health endpoint and enrollment protocol v1.
   4. Authenticate registration readiness without changing Pi data.
-  5. Apply the reviewed guest, PAM, Polkit, sudoers, SSH, and timer policy.
+  5. Apply the reviewed guest, PAM, Polkit, sudoers, SSH, and lifecycle-trigger policy.
   6. Publish the provisioner key only after hardened setup succeeds.
 
 Continue? [y/N]: y
@@ -121,7 +121,7 @@ Continue? [y/N]: y
 
 [6/8] Applying the hardened LabGate machine setup
 | LabGate machine setup complete for Lab A - PC 01 (100.92.10.14); password length is 8.
-[OK] Guest, PAM, Polkit, sudoers, SSH, and timer policy applied.
+[OK] Guest, PAM, Polkit, sudoers, SSH, and lifecycle-trigger policy applied.
 
 [7/8] Publishing the key last and sending a safe heartbeat
 [OK] Provisioner key published; initial safe heartbeat service completed.
@@ -137,7 +137,7 @@ Tailscale address:       100.92.10.14
 SSH host-key pin:        SHA256:REDACTED
 Provisioner key:         SHA256:REDACTED
 Guest account:           locked
-Lifecycle timers:        enabled and active
+Lifecycle triggers:      path and timers enabled and active
 Initial heartbeat:       local service completed
 
 Required operator actions
@@ -176,7 +176,7 @@ Planned changes
   2. Connect this endpoint to Tailscale.
   3. Verify the Pi health endpoint and enrollment protocol v1.
   4. Authenticate registration readiness without changing Pi data.
-  5. Apply the reviewed guest, PAM, Polkit, sudoers, SSH, and timer policy.
+  5. Apply the reviewed guest, PAM, Polkit, sudoers, SSH, and lifecycle-trigger policy.
   6. Publish the provisioner key only after hardened setup succeeds.
 
 Continue? [y/N]: y
@@ -200,7 +200,7 @@ Continue? [y/N]: y
 
 [6/8] Applying the hardened LabGate machine setup
 | LabGate machine setup complete for Lab A - PC 02 (100.92.10.15); password length is 8.
-[OK] Guest, PAM, Polkit, sudoers, SSH, and timer policy applied.
+[OK] Guest, PAM, Polkit, sudoers, SSH, and lifecycle-trigger policy applied.
 
 [7/8] Publishing the key last and sending a safe heartbeat
 [OK] Provisioner key published; initial safe heartbeat service completed.
@@ -216,7 +216,7 @@ Tailscale address:       100.92.10.15
 SSH host-key pin:        SHA256:REDACTED
 Provisioner key:         SHA256:REDACTED
 Guest account:           locked
-Lifecycle timers:        enabled and active
+Lifecycle triggers:      path and timers enabled and active
 Initial heartbeat:       local service completed
 
 Required operator actions
