@@ -172,7 +172,7 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
 
 - [x] Commit and push every project-file change locally before the Raspberry Pi
   pulls it; limit direct Pi edits to ignored environment/configuration data.
-- [ ] Deploy the reviewed commit on the Pi and record post-deploy health and
+- [x] Deploy the reviewed commit on the Pi and record post-deploy health and
   migration evidence.
 - [x] Document configuration values and matching Pi/lab-machine timeout values,
   deployment/update/rollback, machine enrollment, PAM install/inspect/reset,
@@ -326,6 +326,18 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   development host could not inspect the intended root-only installed worker
   without an interactive sudo password. Pi/workstation rollout and timed
   healthy/outage physical acceptance remain open, so Phase 8 stays unchecked.
+- 2026-07-18 near-real-time logout Pi rollout: local and `origin/main` matched
+  reviewed feature commit `1d367a3b46840ff97899156d8baab1ef30faecdc` while the
+  existing `.gitignore` change remained unstaged. The Pi advanced by
+  fast-forward from `7d8448d0827bd7053ee4ab7ff5bdf792bcfbf62b`, with no
+  migration diff, after an integrity-checked quiescent SQLite backup at
+  `backups/labgate-20260718T111805Z.db` was secured to mode 0600. Compose rebuilt
+  successfully, reported healthy, returned loopback health 200, showed no
+  pending migrations, and passed post-deploy SQLite integrity on the reviewed
+  commit with a clean tracked Pi worktree. The local EndeavourOS workstation
+  still has the retry timer enabled/active but no path unit; its update requires
+  an operator-entered sudo password, so no privileged workstation mutation or
+  physical healthy/outage acceptance was attempted and Phase 8 stays unchecked.
 - Regression coverage includes exact default eight-character and minimum
   five-character passwords plus invalid configuration, atomic checkout conflict,
   active-session survival past the login deadline, exact close/release,
