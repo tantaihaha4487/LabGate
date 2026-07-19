@@ -300,7 +300,7 @@ Options:
   -h, --help      Show this help text.
 
 Fresh enrollment prompts for the Pi API origin, machine name, password length,
-registration secret, optional Tailscale auth key, and the Pi's Ed25519
+guest-home persistence, registration secret, optional Tailscale auth key, and the Pi's Ed25519
 provisioner public key. Secrets are read from /dev/tty without echo. Color is
 enabled automatically on a terminal and disabled when output is redirected or
 NO_COLOR is set.
@@ -889,6 +889,7 @@ run_hardened_setup() {
   export LABGATE_API_URL=${api_url}
   export LABGATE_MACHINE_NAME=${machine_name}
   export LABGATE_PASSWORD_LENGTH=${password_length}
+  export LABGATE_KEEP_GUEST_HOME=${guest_home_mode}
   export NO_PROXY='*'
   export no_proxy='*'
   unset LABGATE_PAM_FILE LABGATE_MIGRATE_LEGACY_OUTBOX 2>/dev/null || true
@@ -1012,6 +1013,14 @@ read_safe_config_default existing_api_url \
   "${CONFIG_DIRECTORY}/api-url" ''
 read_safe_config_default existing_password_length \
   "${CONFIG_DIRECTORY}/password-length" '8'
+existing_guest_home_mode=n
+if [[ -e ${CONFIG_DIRECTORY}/guest-home-mode || -L ${CONFIG_DIRECTORY}/guest-home-mode ]]; then
+  labgate_load_guest_home_mode \
+    || die "persisted guest-home-mode is missing, invalid, or not root-owned 0600"
+  existing_guest_home_mode=${LABGATE_GUEST_HOME_MODE}
+elif (( fresh_install == 0 )); then
+  die "existing enrollment is missing the required guest-home-mode configuration"
+fi
 api_url=${LABGATE_API_URL:-}
 machine_name=${LABGATE_MACHINE_NAME:-$(default_machine_name)}
 password_length=${LABGATE_PASSWORD_LENGTH:-}
@@ -1038,6 +1047,21 @@ else
     'Guest password length (5-128; normally 8)' "${existing_password_length}" \
     validate_password_length \
     'guest password length must be a whole number between 5 and 128; use 8 unless the Pi is configured differently'
+fi
+if [[ ${LABGATE_KEEP_GUEST_HOME+x} ]]; then
+  labgate_validate_guest_home_mode "${LABGATE_KEEP_GUEST_HOME}" \
+    || die "LABGATE_KEEP_GUEST_HOME must be exactly y or n"
+  guest_home_mode=${LABGATE_KEEP_GUEST_HOME}
+elif [[ ${LABGATE_INSTALL_NONINTERACTIVE:-0} == 1 ]]; then
+  guest_home_mode=${existing_guest_home_mode}
+else
+  prompt_value guest_home_choice 'Keep /home/guest contents between sessions? [y/N]' \
+    "${existing_guest_home_mode}"
+  case "${guest_home_choice}" in
+    y|Y) guest_home_mode=y ;;
+    n|N) guest_home_mode=n ;;
+    *) print_input_error 'enter y or n'; exit 1 ;;
+  esac
 fi
 if (( fresh_install == 1 )); then
   registration_secret=${provided_registration_secret}
@@ -1122,6 +1146,11 @@ print_preview_row 'Machine:' "${machine_summary}"
 print_preview_row 'Pi API:' "${api_url}"
 print_preview_row 'Pi preflight:' 'health and enrollment compatibility will be checked'
 print_preview_row 'Password length:' "${password_length}"
+if [[ ${guest_home_mode} == y ]]; then
+  print_preview_row 'Guest home:' 'persistent disk-backed contents'
+else
+  print_preview_row 'Guest home:' 'fresh tmpfs per session'
+fi
 print_preview_row 'Tailscale:' "${tailscale_state}"
 print_preview_row 'Provisioner key:' "${key_fingerprint}"
 print_preview_row 'Registration key:' "${registration_summary}"

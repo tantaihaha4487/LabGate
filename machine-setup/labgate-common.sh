@@ -22,6 +22,7 @@ readonly LABGATE_TOMBSTONE_DIRECTORY=${LABGATE_STATE_DIRECTORY}/tombstones
 readonly LABGATE_OUTBOX_SEQUENCE_LOCK=${LABGATE_LOCK_DIRECTORY}/outbox-sequence.lock
 readonly LABGATE_OUTBOX_WORKER_LOCK=${LABGATE_LOCK_DIRECTORY}/webhook-outbox.lock
 readonly LABGATE_PASSWORD_LENGTH_FILE=${LABGATE_CONFIG_DIRECTORY}/password-length
+readonly LABGATE_GUEST_HOME_MODE_FILE=${LABGATE_CONFIG_DIRECTORY}/guest-home-mode
 readonly LABGATE_AUTH_FAILURE_BACKENDS_FILE=${LABGATE_CONFIG_DIRECTORY}/auth-failure-backends
 readonly LABGATE_SSH_HOST_KEY_SHA256_FILE=${LABGATE_CONFIG_DIRECTORY}/ssh-host-key-sha256
 readonly LABGATE_WEBHOOK_CURL_CONFIG=${LABGATE_CONFIG_DIRECTORY}/webhook-curl.conf
@@ -38,6 +39,7 @@ readonly LABGATE_CREDENTIAL_ID_PATTERN='^[A-Za-z0-9_-]{20,64}$'
 readonly LABGATE_PASSWORD_PATTERN='^[A-HJ-NP-Za-km-z2-9]{5,128}$'
 
 LABGATE_CREDENTIAL_ID=
+LABGATE_GUEST_HOME_MODE=
 LABGATE_CREDENTIAL_EXPIRES_AT=
 LABGATE_CREDENTIAL_STATE=
 LABGATE_STATE_VERSION=
@@ -77,6 +79,24 @@ labgate_validate_registration_secret() {
 
   (( ${#secret} >= 20 && ${#secret} <= 256 )) \
     && [[ ${secret} =~ ^[A-Za-z0-9._~+/-]+={0,2}$ ]]
+}
+
+labgate_validate_guest_home_mode() {
+  [[ ${1:-} == y || ${1:-} == n ]]
+}
+
+labgate_load_guest_home_mode() {
+  local extra mode
+
+  labgate_file_is_root_private "${LABGATE_GUEST_HOME_MODE_FILE}" || return 1
+  {
+    IFS= read -r mode || return 1
+    if IFS= read -r extra; then
+      return 1
+    fi
+  } <"${LABGATE_GUEST_HOME_MODE_FILE}"
+  labgate_validate_guest_home_mode "${mode}" || return 1
+  LABGATE_GUEST_HOME_MODE=${mode}
 }
 
 labgate_validate_api_origin() {
@@ -839,14 +859,31 @@ labgate_unmount_guest_home() {
   labgate_prepare_dormant_home
 }
 
+labgate_guest_home_mode_change_is_drained() {
+  local session_status
+
+  labgate_guest_is_locked || return 1
+  session_status=0
+  labgate_guest_session_status >/dev/null 2>&1 || session_status=$?
+  (( session_status == 1 )) || return 1
+  labgate_guest_processes_absent || return 1
+  ! mountpoint --quiet "${LABGATE_GUEST_HOME}" || return 1
+  [[ ! -e ${LABGATE_GUEST_LINGER_FILE} && ! -L ${LABGATE_GUEST_LINGER_FILE} ]]
+}
+
 labgate_mount_fresh_guest_home() {
   local filesystem guest_gid guest_uid
 
+  labgate_load_guest_home_mode || return 1
   guest_uid=$(id -u guest) || return 1
   guest_gid=$(id -g guest) || return 1
   labgate_clear_guest_external_state || return 1
   labgate_clear_guest_scratch || return 1
   labgate_unmount_guest_home || return 1
+  if [[ ${LABGATE_GUEST_HOME_MODE} == y ]]; then
+    labgate_create_fresh_guest_runtime_directory
+    return
+  fi
   mount --types tmpfs \
     --options "uid=${guest_uid},gid=${guest_gid},mode=0700,size=512M,nosuid,nodev" \
     tmpfs "${LABGATE_GUEST_HOME}" || return 1

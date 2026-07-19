@@ -241,6 +241,7 @@ case "${invoked_as}" in
     ;;
 
   mount)
+    : >"${control}/mount-invoked"
     : >"${control}/home-mounted"
     ;;
 
@@ -404,11 +405,12 @@ reset_fixture() {
   install -d -m 0700 /var/lib/labgate/outbox /var/lib/labgate/tombstones
 
   printf '8\n' >/etc/labgate/password-length
+  printf 'n\n' >/etc/labgate/guest-home-mode
   printf 'faillock\n' >/etc/labgate/auth-failure-backends
   printf 'http://labgate.test\n' >/etc/labgate/api-url
   printf 'header = "Authorization: Bearer test-only-token"\n' >/etc/labgate/webhook-curl.conf
   chmod 0600 \
-    /etc/labgate/password-length /etc/labgate/auth-failure-backends \
+    /etc/labgate/password-length /etc/labgate/guest-home-mode /etc/labgate/auth-failure-backends \
     /etc/labgate/api-url /etc/labgate/webhook-curl.conf
   printf '%s\n' "${NOW}" >"${control}/now"
   printf 'L\n' >"${control}/account-status"
@@ -1030,6 +1032,39 @@ test_guest_external_state_boundary() {
     && ! -e /dev/mqueue/labgate-stale ]] || return 1
 }
 
+test_persistent_guest_home_mode() {
+  reset_fixture || return 1
+  printf 'y\n' >/etc/labgate/guest-home-mode
+  chmod 0600 /etc/labgate/guest-home-mode
+  printf 'persistent data\n' >/home/guest/keep.txt
+  expect_success 'persistent home opens without tmpfs' \
+    issue_credential "${CREDENTIAL_A}" "${FUTURE}" "${PASSWORD}" || return 1
+  expect_success 'persistent home PAM open' run_pam open_session || return 1
+  [[ -f /home/guest/keep.txt && ! -e ${control}/mount-invoked ]] || return 1
+  expect_success 'persistent home PAM close' run_pam close_session || return 1
+  [[ -f /home/guest/keep.txt && ! -e ${control}/home-mounted ]] || return 1
+}
+
+test_guest_home_mode_validation_and_drain_gate() {
+  reset_fixture || return 1
+  expect_success 'drained mode-change precondition' bash -c '
+    source /usr/local/lib/labgate/labgate-common.sh
+    labgate_guest_home_mode_change_is_drained
+  ' || return 1
+  printf 'x\n' >/etc/labgate/guest-home-mode
+  chmod 0600 /etc/labgate/guest-home-mode
+  expect_failure 'invalid persisted home mode is rejected' bash -c '
+    source /usr/local/lib/labgate/labgate-common.sh
+    labgate_load_guest_home_mode
+  ' || return 1
+  printf 'y\n' >/etc/labgate/guest-home-mode
+  printf 'active\n' >"${control}/session-status"
+  expect_failure 'active session blocks mode changes' bash -c '
+    source /usr/local/lib/labgate/labgate-common.sh
+    labgate_guest_home_mode_change_is_drained
+  '
+}
+
 test_guest_authentication_reset() {
   reset_fixture || return 1
   [[ -e "${control}/auth-failures" && ! -e "${control}/aging-safe" ]] || return 1
@@ -1599,6 +1634,8 @@ run_inner() {
   run_case 'guest account changes are denied without blocking root' test_guest_account_change_policy
   run_case 'secure paths remove linger before process cleanup and reject persistence' test_guest_linger_safety
   run_case 'runtime, IPC, keyring, and mailbox state is bounded and cleared' test_guest_external_state_boundary
+  run_case 'persistent guest home survives PAM open and close without tmpfs' test_persistent_guest_home_mode
+  run_case 'guest-home mode validation and drained-only changes' test_guest_home_mode_validation_and_drain_gate
   run_case 'credential issue resets PAM counters and non-expiring aging' test_guest_authentication_reset
   run_case 'persistent outbox sequencing survives clock and counter faults' test_outbox_monotonic_sequence
   run_case 'outbox producers never wait for worker network I/O' test_outbox_producer_does_not_wait_for_network

@@ -238,8 +238,11 @@ Prisma schema; the three models above are LabGate's domain models.
     monotonic sequence allocated under its own short local lock, never wall-clock
     time. Producers must never acquire the worker lock that can be held across
     network I/O.
-12. `/home/guest` is remounted as tmpfs on every `open_session`, not only cleared on
-    `close_session` — that's the actual guarantee, not an assumption that close always runs.
+12. `/home/guest` uses root-owned `guest-home-mode`: `n` remounts a fresh tmpfs on
+    every `open_session`, while `y` keeps the disk-backed contents. Both modes
+    retain bounded runtime, IPC, keyring, mailbox, and scratch cleanup. Changing
+    mode requires a locked, session-free, process-free, unmounted machine with
+    no guest linger marker.
     Secure close/recovery also removes `/run/user/<guest UID>`, guest-owned POSIX
     mqueues, guest-created/owned System V IPC, the guest persistent keyring, exact
     `guest` mailboxes under `/var/mail` and `/var/spool/mail`, and guest-owned entries

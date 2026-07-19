@@ -48,6 +48,14 @@ one DNS hostname or IPv4 address and an optional non-default port; paths,
 userinfo, query strings, fragments, IPv6, whitespace, and a trailing slash are
 rejected.
 
+The installer also asks <code>Keep /home/guest contents between sessions? [y/N]:</code>.
+Answer <code>y</code> for a persistent disk-backed home or <code>n</code> (or Enter on
+fresh enrollment) for a fresh tmpfs home. On reruns, Enter preserves the existing
+root-owned <code>/etc/labgate/guest-home-mode</code> setting. Noninteractive runs may
+set <code>LABGATE_KEEP_GUEST_HOME=y</code> or <code>n</code>. Changing the setting is
+allowed only while the machine is locked, session-free, process-free, safely
+unmounted, and has no guest linger marker.
+
 Interactive values are validated immediately. A typo is explained and the same
 question is asked again without advancing to secret input or confirmation. The
 password length must be 5-128; use 8 unless the Pi is intentionally configured
@@ -73,6 +81,7 @@ $ curl -fsSL https://raw.githubusercontent.com/tantaihaha4487/LabGate/main/machi
 Pi LabGate API origin: http://100.64.0.5:3000
 Unique machine name [lab-pc-01]: Lab A - PC 01
 Guest password length (5-128; normally 8) [8]:
+Keep /home/guest contents between sessions? [y/N]:
 Machine registration secret:
 Tailscale auth key (optional; press Enter to skip):
 Paste the Pi provisioner Ed25519 public key: ssh-ed25519 REDACTED
@@ -155,6 +164,7 @@ $ curl -fsSL https://raw.githubusercontent.com/tantaihaha4487/LabGate/main/machi
 Pi LabGate API origin: https://raspberrypi.example.ts.net
 Unique machine name [lab-pc-02]: Lab A - PC 02
 Guest password length (5-128; normally 8) [8]:
+Keep /home/guest contents between sessions? [y/N]:
 Machine registration secret:
 Tailscale auth key (optional; press Enter to skip):
 Paste the Pi provisioner Ed25519 public key: ssh-ed25519 REDACTED

@@ -23,7 +23,7 @@ There is no maximum duration for an active session unless you specify one.
 | Machine state | Version | Local meaning |
 | --- | ---: | --- |
 | <code>pending</code> | 1 | Password issued; login deadline still applies. |
-| <code>active</code> | 2 | PAM opened a new mode-0700 tmpfs home; deadline is ignored. |
+| <code>active</code> | 2 | PAM opened the configured mode-0700 guest home boundary; deadline is ignored. |
 | <code>revoked</code> | 3 | Guest is locked, processes and bounded state are cleared, and home is unmounted. |
 
 ## Monitor the Pi
@@ -103,6 +103,8 @@ sudo mountpoint /home/guest
 Boot-lock and cleanup lock <code>guest</code>, disable guest linger, terminate guest-owned
 processes, clear the bounded runtime, IPC, keyring, mailbox, and scratch paths,
 unmount <code>/home/guest</code>, and record local recovery if any step is uncertain.
+Persistent-home mode deliberately leaves ordinary files under <code>/home/guest</code>
+intact; tmpfs mode has no disk-backed session contents to preserve.
 PAM hooks perform these local actions before placing events in the persistent
 outbox; they never call the network.
 
@@ -223,8 +225,9 @@ Prove all of the following:
   version 3.
 - A login just before the pending deadline remains active after the deadline.
   An unused pending password fails after the deadline.
-- Logout and the next login receive a fresh tmpfs home and a clean mode-0700
-  runtime directory.
+- Logout and the next login receive a fresh tmpfs home in <code>n</code> mode, or
+  preserve ordinary home files in <code>y</code> mode, and both receive a clean
+  mode-0700 runtime directory.
 - A webhook outage leaves ordered outbox events while local lock, process
   cleanup, and unmount still complete.
 - A power cycle runs boot lock before display-manager and SSH login paths.

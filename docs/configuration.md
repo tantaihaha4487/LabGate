@@ -53,6 +53,13 @@ reviewed remaining list and force-recreate the service using the same command.
 many unambiguous alphanumeric characters, and machine setup persists the same
 value in root-only <code>/etc/labgate/password-length</code>.
 
+Machine setup also persists <code>y</code> or <code>n</code> in root-owned mode-0600
+<code>/etc/labgate/guest-home-mode</code>. Persistent mode preserves ordinary
+<code>/home/guest</code> files while still clearing bounded runtime, IPC, keyring,
+mailbox, and scratch state. Tmpfs mode provides a fresh 512 MiB home per session.
+Missing or invalid persisted mode configuration fails closed on an existing
+enrollment.
+
 ## Google OAuth and HTTPS
 
 Configure the Google client for the public origin and add this callback:

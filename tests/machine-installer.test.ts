@@ -608,3 +608,17 @@ test("installer rejects ambiguous source selection and malformed commits early",
   assert.notEqual(malformed.status, 0);
   assert.match(malformed.stderr, /lowercase 40-character Git SHA/);
 });
+
+test("installer exposes the guest-home mode contract", () => {
+  const installer = readFileSync(installerPath, "utf8");
+  const setup = readFileSync(setupPath, "utf8");
+
+  assert.match(installer, /Keep \/home\/guest contents between sessions\? \[y\/N\]/);
+  assert.match(installer, /LABGATE_KEEP_GUEST_HOME/);
+  assert.match(installer, /existing_guest_home_mode/);
+  assert.match(installer, /guest_home_mode=y/);
+  assert.match(installer, /guest_home_mode=n/);
+  assert.match(setup, /guest-home-mode/);
+  assert.match(setup, /labgate_guest_home_mode_change_is_drained/);
+  assert.match(setup, /chmod 0600[\s\S]*guest-home-mode/);
+});

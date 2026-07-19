@@ -599,6 +599,24 @@ elif [[ -e ${CONFIG_DIRECTORY}/password-length || -L ${CONFIG_DIRECTORY}/passwor
     || die "could not read existing password-length configuration"
 fi
 
+existing_guest_home_mode=
+guest_home_mode=${LABGATE_KEEP_GUEST_HOME:-}
+if [[ -e ${CONFIG_DIRECTORY}/guest-home-mode || -L ${CONFIG_DIRECTORY}/guest-home-mode ]]; then
+  labgate_load_guest_home_mode \
+    || die "persisted guest-home-mode is missing, invalid, or not root-owned 0600"
+  existing_guest_home_mode=${LABGATE_GUEST_HOME_MODE}
+elif [[ -s ${CONFIG_DIRECTORY}/webhook-token ]]; then
+  die "existing enrollment is missing the required guest-home-mode configuration"
+fi
+if [[ -n ${guest_home_mode} ]]; then
+  labgate_validate_guest_home_mode "${guest_home_mode}" \
+    || die "LABGATE_KEEP_GUEST_HOME must be exactly y or n"
+elif [[ -n ${existing_guest_home_mode} ]]; then
+  guest_home_mode=${existing_guest_home_mode}
+else
+  guest_home_mode=n
+fi
+
 labgate_validate_api_origin "${api_url}" \
   || die "LABGATE_API_URL must be an origin-only HTTP(S) URL with a canonical hostname or IPv4 address and optional port 1-65535"
 [[ ${machine_name} =~ ^[A-Za-z0-9._\ -]{1,64}$ ]] || die "machine name contains unsupported characters"
@@ -636,6 +654,10 @@ fi
 if [[ -z ${existing_webhook_token} ]]; then
   labgate_validate_registration_secret "${LABGATE_REGISTRATION_SECRET:-}" \
     || die "LABGATE_REGISTRATION_SECRET must be supplied and valid before first-registration setup can change account, PAM, or SSH policy"
+fi
+if [[ -n ${existing_guest_home_mode} && ${guest_home_mode} != "${existing_guest_home_mode}" ]]; then
+  labgate_guest_home_mode_change_is_drained \
+    || die "guest-home-mode changes require a drained machine: locked, session-free, process-free, unmounted, and no linger marker"
 fi
 getent passwd provisioner >/dev/null || die "provisioner account must already exist"
 
@@ -741,6 +763,10 @@ getent group | awk -F: -v gid="${guest_gid}" '$3 == gid { count++ } END { exit c
   || die "guest primary GID must not be shared with another group"
 [[ $(id -G guest) == "${guest_gid}" ]] \
   || die "guest must not belong to supplementary groups"
+if [[ -n ${existing_guest_home_mode} && ${guest_home_mode} != "${existing_guest_home_mode}" ]]; then
+  labgate_guest_home_mode_change_is_drained \
+    || die "guest-home-mode changes require a drained machine: locked, session-free, process-free, unmounted, and no linger marker"
+fi
 audit_guest_sudo_boundary
 
 if (( legacy_outbox_migration_required == 1 )); then
@@ -814,14 +840,18 @@ done
 
 for config_path in \
   "${CONFIG_DIRECTORY}/api-url" "${CONFIG_DIRECTORY}/password-length" \
+  "${CONFIG_DIRECTORY}/guest-home-mode" \
   "${CONFIG_DIRECTORY}/pam-file" "${CONFIG_DIRECTORY}/auth-failure-backends" \
   "${CONFIG_DIRECTORY}/ssh-host-key-sha256"; do
   [[ ! -L ${config_path} ]] || die "unsafe configuration symlink: ${config_path}"
 done
 printf '%s\n' "${api_url}" >"${CONFIG_DIRECTORY}/api-url"
 printf '%s\n' "${password_length}" >"${CONFIG_DIRECTORY}/password-length"
-chown root:root "${CONFIG_DIRECTORY}/api-url" "${CONFIG_DIRECTORY}/password-length"
-chmod 0600 "${CONFIG_DIRECTORY}/api-url" "${CONFIG_DIRECTORY}/password-length"
+printf '%s\n' "${guest_home_mode}" >"${CONFIG_DIRECTORY}/guest-home-mode"
+chown root:root "${CONFIG_DIRECTORY}/api-url" "${CONFIG_DIRECTORY}/password-length" \
+  "${CONFIG_DIRECTORY}/guest-home-mode"
+chmod 0600 "${CONFIG_DIRECTORY}/api-url" "${CONFIG_DIRECTORY}/password-length" \
+  "${CONFIG_DIRECTORY}/guest-home-mode"
 
 # Secure the shared account before PAM, Tailscale, registration, or SSH setup
 # can fail. On an already-configured host the RemainAfterExit unit is active,

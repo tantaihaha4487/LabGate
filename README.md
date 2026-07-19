@@ -37,7 +37,7 @@ There is no maximum duration for an active session unless you specify one.
 | State | Version | Meaning |
 | --- | ---: | --- |
 | <code>pending</code> | 1 | Password issued; no physical PAM session yet. |
-| <code>active</code> | 2 | PAM opened a fresh tmpfs home; the machine remains occupied. |
+| <code>active</code> | 2 | PAM opened the configured guest home boundary; the machine remains occupied. |
 | <code>revoked</code> | 3 | The exact generation is locked and local cleanup completed. |
 
 The server releases a machine only after an exact generation-3 report or a

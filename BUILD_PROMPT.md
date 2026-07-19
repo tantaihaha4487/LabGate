@@ -20,10 +20,11 @@ value from `/etc/labgate/password-length`. Supported values are 5–128.
 
 1. Checkout creates one credential generation, marks the machine `occupied`,
    and issues state `pending` / version `1` to the machine.
-2. Physical PAM open before the deadline creates a fresh tmpfs home and advances
+2. Physical PAM open before the deadline creates the configured guest home boundary
+   (fresh tmpfs in `n` mode or disk-backed home in `y` mode) and advances
    the same generation to `active` / version `2`.
 3. Physical PAM close locally locks the account, terminates guest-owned
-   processes, unmounts the tmpfs, and advances to `revoked` / version `3`.
+   processes, unmounts `/home/guest`, and advances to `revoked` / version `3`.
 4. If no physical login happens before the deadline, local cleanup performs the
    same secure revocation and reports version `3`.
 5. The server returns a machine to `available` only after an exact-generation
@@ -310,7 +311,8 @@ At minimum prove:
 - pending version 1, active version 2, revoked version 3;
 - successful physical login just before expiry continues after expiry;
 - unused password fails after pending expiry;
-- logout and next login use a fresh tmpfs;
+- logout and next login use a fresh tmpfs in `n` mode, or preserve ordinary
+  home files in `y` mode;
 - webhook outage retains ordered events while local safety still completes;
 - power-cycle boot lock and stale-active recovery;
 - guest SSH denial, provisioner command restriction, and administrator SSH;

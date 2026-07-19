@@ -162,6 +162,10 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   credential deadline.
 - [ ] Prove PAM `close_session` locks `guest`, unmounts the tmpfs, reports
   session-close best-effort, revokes the credential, and releases the machine.
+- [x] Add configurable guest-home persistence, root-owned mode validation,
+  drained-only mode changes, and local automated coverage for both modes.
+- [ ] Verify both guest-home modes on a real physical endpoint; keep Phase 8
+  unchecked until that evidence is recorded.
 - [x] Prove failed/slow webhooks cannot prevent local lock or unmount behavior.
 - [ ] Prove the local systemd timer and Pi-side sweep independently recover the
   intended failure cases without terminating a genuinely active session.
