@@ -242,7 +242,9 @@ Prisma schema; the three models above are LabGate's domain models.
     every `open_session`, while `y` keeps the disk-backed contents. Both modes
     retain bounded runtime, IPC, keyring, mailbox, and scratch cleanup. Changing
     mode requires a locked, session-free, process-free, unmounted machine with
-    no guest linger marker.
+    no guest linger marker. In persistent mode the unmounted dormant directory is
+    sealed as `root:root 0700`; PAM open changes only that top-level directory to
+    `guest:guest 0700`, preserving its contents, and close/recovery seals it again.
     Secure close/recovery also removes `/run/user/<guest UID>`, guest-owned POSIX
     mqueues, guest-created/owned System V IPC, the guest persistent keyring, exact
     `guest` mailboxes under `/var/mail` and `/var/spool/mail`, and guest-owned entries

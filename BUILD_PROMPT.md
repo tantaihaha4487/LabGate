@@ -23,6 +23,9 @@ value from `/etc/labgate/password-length`. Supported values are 5–128.
 2. Physical PAM open before the deadline creates the configured guest home boundary
    (fresh tmpfs in `n` mode or disk-backed home in `y` mode) and advances
    the same generation to `active` / version `2`.
+   Persistent mode hands the preserved top-level home to `guest:guest 0700` only
+   for the active session; close/recovery restores `root:root 0700` without
+   recursively changing or deleting contents.
 3. Physical PAM close locally locks the account, terminates guest-owned
    processes, unmounts `/home/guest`, and advances to `revoked` / version `3`.
 4. If no physical login happens before the deadline, local cleanup performs the

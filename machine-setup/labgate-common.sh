@@ -851,6 +851,20 @@ labgate_prepare_dormant_home() {
   install -d -o root -g root -m 0700 "${LABGATE_GUEST_HOME}"
 }
 
+labgate_activate_persistent_guest_home() {
+  local guest_gid guest_uid metadata
+
+  [[ ${LABGATE_GUEST_HOME_MODE:-} == y ]] || return 1
+  [[ ! -L ${LABGATE_GUEST_HOME} ]] || return 1
+  mountpoint --quiet "${LABGATE_GUEST_HOME}" && return 1
+  guest_uid=$(id -u guest) || return 1
+  guest_gid=$(id -g guest) || return 1
+  install -d -o "${guest_uid}" -g "${guest_gid}" -m 0700 \
+    "${LABGATE_GUEST_HOME}" || return 1
+  metadata=$(stat -c '%u:%g:%a' -- "${LABGATE_GUEST_HOME}") || return 1
+  [[ ${metadata} == "${guest_uid}:${guest_gid}:700" ]]
+}
+
 labgate_unmount_guest_home() {
   if mountpoint --quiet "${LABGATE_GUEST_HOME}"; then
     umount "${LABGATE_GUEST_HOME}" || return 1
@@ -881,6 +895,7 @@ labgate_mount_fresh_guest_home() {
   labgate_clear_guest_scratch || return 1
   labgate_unmount_guest_home || return 1
   if [[ ${LABGATE_GUEST_HOME_MODE} == y ]]; then
+    labgate_activate_persistent_guest_home || return 1
     labgate_create_fresh_guest_runtime_directory
     return
   fi

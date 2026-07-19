@@ -164,6 +164,8 @@ put passwords, OAuth values, webhook tokens, or other secrets in this file.
   session-close best-effort, revokes the credential, and releases the machine.
 - [x] Add configurable guest-home persistence, root-owned mode validation,
   drained-only mode changes, and local automated coverage for both modes.
+- [x] Repair persistent-home activation so PAM open hands the preserved top-level
+  directory to `guest:guest 0700` and secure close restores `root:root 0700`.
 - [ ] Verify both guest-home modes on a real physical endpoint; keep Phase 8
   unchecked until that evidence is recorded.
 - [x] Prove failed/slow webhooks cannot prevent local lock or unmount behavior.

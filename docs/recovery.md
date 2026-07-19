@@ -104,7 +104,9 @@ Boot-lock and cleanup lock <code>guest</code>, disable guest linger, terminate g
 processes, clear the bounded runtime, IPC, keyring, mailbox, and scratch paths,
 unmount <code>/home/guest</code>, and record local recovery if any step is uncertain.
 Persistent-home mode deliberately leaves ordinary files under <code>/home/guest</code>
-intact; tmpfs mode has no disk-backed session contents to preserve.
+intact. Its dormant top-level directory is sealed as <code>root:root 0700</code>, opened
+as <code>guest:guest 0700</code> for the active physical session, and sealed again on
+close/recovery. Tmpfs mode has no disk-backed session contents to preserve.
 PAM hooks perform these local actions before placing events in the persistent
 outbox; they never call the network.
 

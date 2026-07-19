@@ -1033,6 +1033,8 @@ test_guest_external_state_boundary() {
 }
 
 test_persistent_guest_home_mode() {
+  local activate_line runtime_line
+
   reset_fixture || return 1
   printf 'y\n' >/etc/labgate/guest-home-mode
   chmod 0600 /etc/labgate/guest-home-mode
@@ -1041,8 +1043,18 @@ test_persistent_guest_home_mode() {
     issue_credential "${CREDENTIAL_A}" "${FUTURE}" "${PASSWORD}" || return 1
   expect_success 'persistent home PAM open' run_pam open_session || return 1
   [[ -f /home/guest/keep.txt && ! -e ${control}/mount-invoked ]] || return 1
+  [[ $(stat -c '%u:%g:%a' -- /home/guest) == 0:0:700 ]] || return 1
   expect_success 'persistent home PAM close' run_pam close_session || return 1
-  [[ -f /home/guest/keep.txt && ! -e ${control}/home-mounted ]] || return 1
+  [[ -f /home/guest/keep.txt && ! -e ${control}/home-mounted \
+    && $(stat -c '%U:%G:%a' -- /home/guest) == root:root:700 ]] || return 1
+  grep -Fq 'install -d -o "${guest_uid}" -g "${guest_gid}" -m 0700' \
+    /usr/local/lib/labgate/labgate-common.sh || return 1
+  activate_line=$(grep -n -m1 'labgate_activate_persistent_guest_home || return 1' \
+    /usr/local/lib/labgate/labgate-common.sh | cut -d: -f1) || return 1
+  runtime_line=$(sed -n "${activate_line},$((activate_line + 3))p" \
+    /usr/local/lib/labgate/labgate-common.sh \
+    | grep -n -m1 'labgate_create_fresh_guest_runtime_directory' | cut -d: -f1) || return 1
+  (( runtime_line > 1 ))
 }
 
 test_guest_home_mode_validation_and_drain_gate() {
