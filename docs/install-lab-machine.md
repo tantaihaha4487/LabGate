@@ -251,6 +251,30 @@ the exact commands printed by the installer, correct the cause, and start it
 again. Any other failed stage links to the same recovery guide. Do not allow
 student use after a failed stage.
 
+### If stage 6 reports an invalid global sudoers policy
+
+The installer validates the host's complete sudoers policy before applying the
+LabGate-specific rule. A pre-existing file with the wrong owner, mode, or syntax
+can therefore stop setup before LabGate changes its own sudoers fragment.
+
+Use an administrator terminal and repair only the ownership and modes when they
+are wrong:
+
+~~~sh
+sudo chown root:root /etc/sudo.conf /etc/sudoers
+sudo chmod 0644 /etc/sudo.conf
+sudo chmod 0440 /etc/sudoers
+sudo chown root:root /etc/sudoers.d/*
+sudo chmod 0440 /etc/sudoers.d/*
+sudo visudo -c
+~~~
+
+The final command must also use <code>sudo</code>; running <code>visudo -c</code> as
+an ordinary user can itself fail with <code>unable to open /etc/sudoers: Permission
+denied</code>, even after the repair. Do not delete or rewrite unrelated sudoers
+rules. Rerun the installer only after <code>sudo visudo -c</code> reports that the
+policy parsed successfully.
+
 ## Preview and pin the source
 
 Preview without host or Pi mutation:
