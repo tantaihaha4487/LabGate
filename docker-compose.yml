@@ -6,6 +6,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env.local
+    dns:
+      - 100.100.100.100
     ports:
       - "3000:3000"
     healthcheck:
