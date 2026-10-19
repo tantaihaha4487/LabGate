@@ -1,0 +1,2 @@
+Defaults:provisioner env_reset
+provisioner ALL=(root) NOPASSWD:NOLOG_INPUT:NOLOG_OUTPUT: /usr/local/sbin/guest-account.sh

@@ -1,0 +1,10 @@
+[Unit]
+Description=Flush queued LabGate lifecycle webhooks
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/guest-webhook-flush.sh
+UMask=0077
+TimeoutStartSec=30s

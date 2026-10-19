@@ -1,0 +1,11 @@
+[Unit]
+Description=Send regular LabGate machine heartbeats
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=45s
+AccuracySec=5s
+Unit=guest-heartbeat.service
+
+[Install]
+WantedBy=timers.target

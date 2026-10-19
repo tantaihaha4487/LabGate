@@ -1,0 +1,9 @@
+[Unit]
+Description=Flush queued LabGate lifecycle webhooks when the outbox changes
+
+[Path]
+PathChanged=/var/lib/labgate/outbox
+Unit=guest-webhook-flush.service
+
+[Install]
+WantedBy=multi-user.target

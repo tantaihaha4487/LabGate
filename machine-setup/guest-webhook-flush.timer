@@ -1,0 +1,12 @@
+[Unit]
+Description=Retry queued LabGate lifecycle webhooks
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=10s
+AccuracySec=2s
+Persistent=true
+Unit=guest-webhook-flush.service
+
+[Install]
+WantedBy=timers.target
