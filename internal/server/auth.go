@@ -2,16 +2,19 @@ package server
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"labgate/internal/core"
 	"labgate/internal/store"
-	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,15 +30,15 @@ type Auth struct {
 	mu       sync.Mutex
 	provider *oidc.Provider
 	oauth    oauth2.Config
-	rates    map[string]rate
-}
-type rate struct {
-	n     int
-	until time.Time
+	// bindKey authenticates OAuth request cookies for this process only.
+	bindKey []byte
 }
 
+// maxPendingPairings bounds unapproved CLI pairings kept for five minutes.
+const maxPendingPairings = 1024
+
 func NewAuth(c *core.Service) *Auth {
-	return &Auth{core: c, rates: map[string]rate{}, oauth: oauth2.Config{ClientID: c.Config.GoogleID, ClientSecret: c.Config.GoogleSecret, RedirectURL: c.Config.Origin + "/api/auth/callback/google", Endpoint: google.Endpoint, Scopes: []string{oidc.ScopeOpenID, "email", "profile"}}}
+	return &Auth{core: c, bindKey: []byte(store.Random(32)), oauth: oauth2.Config{ClientID: c.Config.GoogleID, ClientSecret: c.Config.GoogleSecret, RedirectURL: c.Config.Origin + "/api/auth/callback/google", Endpoint: google.Endpoint, Scopes: []string{oidc.ScopeOpenID, "email", "profile"}}}
 }
 func equal(a, b string) bool {
 	return a != "" && b != "" && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
@@ -72,26 +75,30 @@ func (a *Auth) CSRF(r *http.Request, raw, kind string) bool {
 func (a *Auth) cookie(w http.ResponseWriter, name, v string, age int) {
 	http.SetCookie(w, &http.Cookie{Name: name, Value: v, Path: "/", MaxAge: age, HttpOnly: true, Secure: strings.HasPrefix(a.core.Config.Origin, "https://"), SameSite: http.SameSiteLaxMode})
 }
-func (a *Auth) limit(r *http.Request) bool {
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	now := time.Now()
-	for k, v := range a.rates {
-		if now.After(v.until) {
-			delete(a.rates, k)
-		}
+
+// bind returns state.nonce.verifier.expiry.mac; every part is base64url or digits.
+func (a *Auth) bind(state, nonce, verifier string, expires time.Time) string {
+	v := state + "." + nonce + "." + verifier + "." + strconv.FormatInt(store.Time(expires), 10)
+	m := hmac.New(sha256.New, a.bindKey)
+	m.Write([]byte(v))
+	return v + "." + base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+}
+func (a *Auth) unbind(cookie, state string) (string, string, bool) {
+	f := strings.Split(cookie, ".")
+	if len(f) != 5 || f[1] == "" || f[2] == "" || !equal(f[0], state) {
+		return "", "", false
 	}
-	if len(a.rates) >= 1024 {
-		return false
+	expires, e := strconv.ParseInt(f[3], 10, 64)
+	if e != nil || expires <= store.Time(a.core.Now()) {
+		return "", "", false
 	}
-	v := a.rates[host]
-	if now.After(v.until) {
-		v = rate{until: now.Add(time.Minute)}
+	m := hmac.New(sha256.New, a.bindKey)
+	m.Write([]byte(strings.Join(f[:4], ".")))
+	mac, e := base64.RawURLEncoding.DecodeString(f[4])
+	if e != nil || !hmac.Equal(mac, m.Sum(nil)) {
+		return "", "", false
 	}
-	v.n++
-	a.rates[host] = v
-	return v.n <= 30
+	return f[1], f[2], true
 }
 func (a *Auth) getProvider(ctx context.Context) (*oidc.Provider, error) {
 	a.mu.Lock()
@@ -115,49 +122,27 @@ func (a *Auth) Handle(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(405)
 			return
 		}
-		if !a.limit(r) {
-			w.WriteHeader(429)
-			return
-		}
+		// The request binding lives only in the browser's HttpOnly cookie, so
+		// unauthenticated sign-in needs no server state or shared rate limit.
 		state, nonce, verifier := store.Random(32), store.Random(32), oauth2.GenerateVerifier()
-		e := a.core.Store.Tx(ctx, func(t *sql.Tx) error {
-			if _, e := t.ExecContext(ctx, "DELETE FROM go_oauth WHERE expires_at<=?", store.Time(a.core.Now())); e != nil {
-				return e
-			}
-			_, e := t.ExecContext(ctx, "INSERT INTO go_oauth(state_hash,nonce,verifier,expires_at) VALUES(?,?,?,?)", store.Hash(state), nonce, verifier, store.Time(a.core.Now().Add(5*time.Minute)))
-			return e
-		})
-		if e != nil {
-			problem(w, e)
-			return
-		}
-		a.cookie(w, "labgate_oauth", state, 300)
+		a.cookie(w, "labgate_oauth", a.bind(state, nonce, verifier, a.core.Now().Add(5*time.Minute)), 300)
 		http.Redirect(w, r, a.oauth.AuthCodeURL(state, oauth2.SetAuthURLParam("nonce", nonce), oauth2.SetAuthURLParam("hd", a.core.Config.Domain), oauth2.S256ChallengeOption(verifier)), 302)
 	case "/api/auth/callback/google":
 		if r.Method != "GET" {
 			w.WriteHeader(405)
 			return
 		}
-		state := r.URL.Query().Get("state")
 		c, e := r.Cookie("labgate_oauth")
-		if e != nil || !equal(c.Value, state) {
-			write(w, 400, map[string]string{"error": "Invalid OAuth state; sign in again"})
+		var nonce, verifier string
+		ok := false
+		if e == nil {
+			nonce, verifier, ok = a.unbind(c.Value, r.URL.Query().Get("state"))
+		}
+		if !ok {
+			write(w, 400, map[string]string{"error": "Invalid or expired OAuth state; sign in again"})
 			return
 		}
 		a.cookie(w, "labgate_oauth", "", -1)
-		var nonce, verifier string
-		e = a.core.Store.Tx(ctx, func(t *sql.Tx) error {
-			e := t.QueryRowContext(ctx, "SELECT nonce,verifier FROM go_oauth WHERE state_hash=? AND expires_at>?", store.Hash(state), store.Time(a.core.Now())).Scan(&nonce, &verifier)
-			if e != nil {
-				return e
-			}
-			_, e = t.ExecContext(ctx, "DELETE FROM go_oauth WHERE state_hash=?", store.Hash(state))
-			return e
-		})
-		if e != nil {
-			write(w, 400, map[string]string{"error": "OAuth request expired or already used"})
-			return
-		}
 		bounded, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
 		tok, e := a.oauth.Exchange(bounded, r.URL.Query().Get("code"), oauth2.VerifierOption(verifier))
@@ -261,10 +246,6 @@ func (a *Auth) Pair(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.URL.Path {
 	case "/api/cli/start":
-		if !a.limit(r) {
-			w.WriteHeader(429)
-			return
-		}
 		var b struct {
 			Secret string `json:"secret"`
 		}
@@ -281,6 +262,11 @@ func (a *Auth) Pair(w http.ResponseWriter, r *http.Request) {
 		expires := store.Time(a.core.Now().Add(5 * time.Minute))
 		e := a.core.Store.Tx(ctx, func(t *sql.Tx) error {
 			if _, e := t.ExecContext(ctx, "DELETE FROM go_pairings WHERE expires_at<=?", store.Time(a.core.Now())); e != nil {
+				return e
+			}
+			// Bound unauthenticated state without a shared limiter: evict the
+			// oldest unapproved pairings; approved ones await their own poll.
+			if _, e := t.ExecContext(ctx, "DELETE FROM go_pairings WHERE id IN (SELECT id FROM go_pairings WHERE approved_at IS NULL ORDER BY expires_at DESC,id DESC LIMIT -1 OFFSET ?)", maxPendingPairings-1); e != nil {
 				return e
 			}
 			_, e := t.ExecContext(ctx, "INSERT INTO go_pairings(id,secret_hash,code,expires_at) VALUES(?,?,?,?)", id, store.Hash(b.Secret), code, expires)
@@ -320,10 +306,6 @@ func (a *Auth) Pair(w http.ResponseWriter, r *http.Request) {
 		}
 		write(w, 200, map[string]bool{"ok": true})
 	case "/api/cli/poll":
-		if !a.limit(r) {
-			w.WriteHeader(429)
-			return
-		}
 		var b struct {
 			ID     string `json:"id"`
 			Secret string `json:"secret"`

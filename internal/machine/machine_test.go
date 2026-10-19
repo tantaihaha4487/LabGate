@@ -282,3 +282,52 @@ func TestRootLifecycleAndFailSecure(t *testing.T) {
 		}
 	}
 }
+
+type findRunner struct{ *fakeRunner }
+
+func (r findRunner) Command(ctx context.Context, input, name string, args ...string) (string, error) {
+	if filepath.Base(name) == "find" {
+		r.fakeRunner.Command(ctx, input, name, args...)
+		return (ExecRunner{}).Command(ctx, input, name, args...)
+	}
+	return r.fakeRunner.Command(ctx, input, name, args...)
+}
+
+func TestRootCrashDumpsDoNotOutliveGuestSession(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("root-owned fixture runs in disposable containers")
+	}
+	root := t.TempDir()
+	m := New(root, findRunner{&fakeRunner{root: root, locked: true}})
+	for _, p := range []string{"/run/user", "/var/lib/systemd/coredump", "/var/crash", "/var/log/journal/0123456789abcdef0123456789abcdef"} {
+		if e := os.MkdirAll(m.path(p), 0755); e != nil {
+			t.Fatal(e)
+		}
+	}
+	boot := "0123456789abcdef0123456789abcdef"
+	journal := "/var/log/journal/" + boot
+	guest := []string{"/var/lib/systemd/coredump/core.firefox.1001." + boot + ".4242.1792000000000000.zst", "/var/crash/_usr_bin_python3.1001.crash", journal + "/user-1001.journal", journal + "/user-1001@0000000000000001-0000000000000002.journal"}
+	others := []string{"/var/lib/systemd/coredump/core.firefox.1000." + boot + ".4243.1792000000000000.zst", journal + "/user-10010.journal", journal + "/system.journal"}
+	for _, p := range append(guest, others...) {
+		if e := os.WriteFile(m.path(p), []byte("memory"), 0640); e != nil {
+			t.Fatal(e)
+		}
+	}
+	// A matching directory must not make every later reset fail.
+	if e := os.MkdirAll(m.path("/var/crash/evil.1001.crash/nested"), 0755); e != nil {
+		t.Fatal(e)
+	}
+	if e := m.external(context.Background()); e != nil && strings.Contains(e.Error(), "crash") {
+		t.Fatal("crash sweep failed on a directory entry", e)
+	}
+	for _, p := range guest {
+		if _, e := os.Lstat(m.path(p)); !os.IsNotExist(e) {
+			t.Fatal("guest crash dump survived cleanup", p)
+		}
+	}
+	for _, p := range others {
+		if _, e := os.Lstat(m.path(p)); e != nil {
+			t.Fatal("another user's data was removed", p, e)
+		}
+	}
+}

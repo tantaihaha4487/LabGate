@@ -56,6 +56,11 @@ func (m *Runtime) Account(ctx context.Context, args []string, input io.Reader) e
 		return e
 	}
 	defer l.Close()
+	// Uninstall removes local deadline enforcement, so a decommissioned endpoint never unlocks.
+	// Checked under guest.lock: uninstall's boot cleanup re-locks after any issue that got here first.
+	if _, e := os.Lstat(m.path(decommissioned)); action == "issue" && !os.IsNotExist(e) {
+		return errors.New("endpoint decommissioned")
+	}
 	s, se := m.State()
 	if se != nil && !os.IsNotExist(se) {
 		m.recovery("corrupt-state", id)

@@ -200,3 +200,70 @@ func TestOAuthStateReplayAndDomainSession(t *testing.T) {
 		t.Fatal("expired session accepted")
 	}
 }
+
+// Unauthenticated health probes must not each run full database validation.
+func TestHealthProbesShareOneValidation(t *testing.T) {
+	s := testServer(t)
+	for i := 0; i < 5; i++ {
+		if w := request(s, "GET", "/api/health", "", "", nil, false); w.Code != 200 {
+			t.Fatal(w.Code)
+		}
+	}
+	first := s.healthAt
+	if first.IsZero() {
+		t.Fatal("health result not recorded")
+	}
+	if _, e := s.Core.Store.DB.Exec("DROP INDEX audit_log_created_at_id_idx"); e != nil {
+		t.Fatal(e)
+	}
+	if w := request(s, "GET", "/api/health", "", "", nil, false); w.Code != 200 || s.healthAt != first {
+		t.Fatal("probe inside the interval reran full validation")
+	}
+	s.healthAt = first.Add(-healthInterval)
+	if w := request(s, "GET", "/api/health", "", "", nil, false); w.Code != 503 {
+		t.Fatal("expired health result did not revalidate", w.Code)
+	}
+}
+
+func TestRegistrationSecretCannotRekey(t *testing.T) {
+	s := testServer(t)
+	admin := session(t, s, "admin@ubu.ac.th", "web")
+	pin := "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	identity := core.Identity{Name: "Desktop", IP: "100.64.0.1", Pin: pin}
+	w := request(s, "POST", "/api/admin/register-machine", admin, "web", identity, true)
+	var first map[string]any
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &first) != nil {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	token, _ := first["webhookToken"].(string)
+	var id string
+	if e := s.Core.Store.DB.QueryRow("SELECT id FROM machines WHERE webhook_token=?", token).Scan(&id); e != nil || token == "" {
+		t.Fatal("enrolled machine not found", e)
+	}
+	if _, e := s.Core.Store.DB.Exec("UPDATE machines SET status='available' WHERE id=?", id); e != nil {
+		t.Fatal(e)
+	}
+	secret := func(method string, b any) *httptest.ResponseRecorder {
+		v, _ := json.Marshal(b)
+		r := httptest.NewRequest(method, "/api/admin/register-machine", bytes.NewReader(v))
+		r.Header.Set("Authorization", "Bearer "+s.Core.Config.RegistrationSecret)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	rekey := core.Identity{Name: "Desktop", IP: "100.64.0.99", Pin: "SHA256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBA", MachineID: id, ExpectedName: "Desktop", ExpectedIP: "100.64.0.1", ExpectedPin: &pin}
+	if w := secret("PATCH", rekey); w.Code != 403 {
+		t.Fatal("registration secret rekeyed a machine", w.Code, w.Body.String())
+	}
+	var ip, stored string
+	if e := s.Core.Store.DB.QueryRow("SELECT tailscale_ip,webhook_token FROM machines WHERE id=?", id).Scan(&ip, &stored); e != nil || ip != "100.64.0.1" || stored != token {
+		t.Fatal("machine identity changed", ip, e)
+	}
+	var again map[string]any
+	if w := secret("POST", identity); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &again) != nil || again["webhookToken"] != token {
+		t.Fatal("idempotent enrollment broken", w.Code, w.Body.String())
+	}
+	if w := request(s, "PATCH", "/api/admin/register-machine", admin, "web", rekey, true); w.Code != 200 {
+		t.Fatal("admin rekey broken", w.Code, w.Body.String())
+	}
+}

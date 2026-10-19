@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,7 +19,13 @@ type Server struct {
 	Core   *core.Service
 	auth   *Auth
 	static http.Handler
+	// Unauthenticated health probes share one full validation per interval.
+	healthMu  sync.Mutex
+	healthAt  time.Time
+	healthErr error
 }
+
+const healthInterval = 30 * time.Second
 
 // Legacy machine installers compare these JSON records byte-for-byte.
 type healthRecord struct {
@@ -39,6 +46,15 @@ func New(c *core.Service, static http.Handler) *Server {
 	return s
 }
 func (s *Server) Handler() http.Handler { return http.HandlerFunc(s.handle) }
+func (s *Server) healthy() error {
+	s.healthMu.Lock()
+	defer s.healthMu.Unlock()
+	if s.healthAt.IsZero() || time.Since(s.healthAt) >= healthInterval {
+		s.healthErr = s.Core.Store.Validate()
+		s.healthAt = time.Now()
+	}
+	return s.healthErr
+}
 func write(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -80,7 +96,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	ctx := r.Context()
 	if path == "/api/health" && r.Method == "GET" {
-		if e := s.Core.Store.Validate(); e != nil {
+		if e := s.healthy(); e != nil {
 			write(w, 503, healthRecord{false, "labgate", 1})
 			return
 		}
@@ -137,6 +153,11 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	}
 	registration := path == "/api/admin/register-machine"
 	if registration && equal(token(r), s.Core.Config.RegistrationSecret) {
+		// The installer secret only enrolls; rekey stays behind the admin gate.
+		if r.Method != "GET" && r.Method != "POST" {
+			write(w, 403, map[string]string{"error": "Administrator required"})
+			return
+		}
 		s.enroll(w, r, "")
 		return
 	}

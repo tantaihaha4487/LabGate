@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 )
 
 var sessionHooks = map[string]bool{
@@ -17,6 +18,8 @@ var sessionHooks = map[string]bool{
 	"session required pam_exec.so quiet /usr/local/sbin/guest-session-hook.sh":                    true,
 	"session required pam_exec.so /usr/local/sbin/guest-session-hook.sh":                          true,
 }
+
+const decommissioned = "/var/lib/labgate/decommissioned"
 
 // Uninstall decommissions a drained endpoint while retaining its safety controls.
 func (m *Runtime) Uninstall(ctx context.Context, out io.Writer) error {
@@ -98,6 +101,10 @@ func (m *Runtime) Uninstall(ctx context.Context, out io.Writer) error {
 	}
 	if active {
 		return errors.New("drain the active guest session before uninstalling")
+	}
+	// Refuse remote issue before local enforcement goes away; revoke keeps working.
+	if err = m.atomic(decommissioned, m.Now().UTC().Format(time.RFC3339)+"\n"); err != nil {
+		return err
 	}
 	// Stop writers before cleanup and editing PAM. Any error leaves safety controls in place.
 	for _, unit := range []string{"guest-cleanup.timer", "guest-heartbeat.timer", "guest-webhook-flush.path", "guest-webhook-flush.timer"} {

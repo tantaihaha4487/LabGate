@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -77,5 +78,17 @@ func TestRootMachineUninstall(t *testing.T) {
 	}
 	if !r.locked || !strings.Contains(out.String(), "integration removed") {
 		t.Fatal("safety not verified", out.String())
+	}
+	// A late reservation must not unlock guest once local enforcement is gone.
+	for p, v := range map[string]string{"/etc/labgate/password-length": "12\n", "/etc/labgate/auth-failure-backends": "none\n"} {
+		if err = os.WriteFile(m.path(p), []byte(v), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ran := len(r.commands)
+	deadline := strconv.FormatInt(m.Now().Unix()+600, 10)
+	err = m.Account(context.Background(), []string{"issue", testID, deadline}, strings.NewReader("abcdefghijkm\n"))
+	if err == nil || err.Error() != "endpoint decommissioned" || len(r.commands) != ran || !r.locked {
+		t.Fatal("decommissioned endpoint accepted issue", err, r.commands[ran:])
 	}
 }

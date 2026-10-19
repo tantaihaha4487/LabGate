@@ -307,6 +307,41 @@ func (m *Runtime) external(ctx context.Context) error {
 			failures = append(failures, e)
 		}
 	}
+	// Crash dumps hold a previous student's process memory and stay readable by the shared UID.
+	for _, p := range []string{"/var/lib/systemd/coredump", "/var/crash", "/var/lib/apport/coredump"} {
+		p = m.path(p)
+		if _, e := os.Lstat(p); os.IsNotExist(e) {
+			continue
+		}
+		if e := safeDir(p, false); e != nil {
+			failures = append(failures, e)
+			continue
+		}
+		// Guest-owned entries go depth-first like scratch; root-owned dumps are matched by the UID in their name.
+		for _, match := range [][]string{
+			{"-mindepth", "1", "-uid", uid},
+			{"-mindepth", "1", "-maxdepth", "1", "-type", "f", "-user", "0", "(", "-name", "core.*." + uid + ".????????????????????????????????.*", "-o", "-name", "*." + uid + ".crash", ")"},
+		} {
+			if _, e = m.cmd(ctx, "find", append([]string{p, "-xdev", "-depth"}, append(match, "-delete")...)...); e != nil {
+				failures = append(failures, e)
+			} else if v, e := m.cmd(ctx, "find", append([]string{p, "-xdev"}, append(match, "-print", "-quit")...)...); e != nil || v != "" {
+				failures = append(failures, errors.New("guest crash dumps remain"))
+			}
+		}
+	}
+	// journald grants each UID read access to its own split journal files.
+	journals, _ := filepath.Glob(m.path("/var/log/journal/*"))
+	for _, d := range journals {
+		if s, e := os.Lstat(d); e != nil || !s.IsDir() {
+			continue
+		}
+		match := []string{d, "-xdev", "-mindepth", "1", "-maxdepth", "1", "-type", "f", "(", "-name", "user-" + uid + ".journal*", "-o", "-name", "user-" + uid + "@*", ")"}
+		if _, e = m.cmd(ctx, "find", append(match, "-delete")...); e != nil {
+			failures = append(failures, e)
+		} else if v, e := m.cmd(ctx, "find", append(match, "-print", "-quit")...); e != nil || v != "" {
+			failures = append(failures, errors.New("guest journal remains"))
+		}
+	}
 	return errors.Join(failures...)
 }
 func (m *Runtime) Secure(ctx context.Context) error {

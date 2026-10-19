@@ -700,6 +700,17 @@ install -o root -g root -m 0644 \
   || die "installed LabGate Polkit rule has unsafe metadata"
 cmp -s -- "${SCRIPT_DIRECTORY}/00-labgate-deny-guest.rules" "${POLKIT_RULE}" \
   || die "installed LabGate Polkit rule differs from the committed artifact"
+# Every student shares the guest UID, so crash memory and per-user journals
+# must not persist where that UID can read them.
+install -d -o root -g root -m 0755 /etc/systemd/coredump.conf.d /etc/systemd/journald.conf.d
+printf '[Coredump]\nStorage=none\nProcessSizeMax=0\n' >/etc/systemd/coredump.conf.d/labgate.conf
+printf '[Journal]\nSplitMode=none\n' >/etc/systemd/journald.conf.d/labgate.conf
+chmod 0644 /etc/systemd/coredump.conf.d/labgate.conf /etc/systemd/journald.conf.d/labgate.conf
+systemctl restart systemd-journald.service || die "systemd-journald did not restart"
+if [[ -f /etc/default/apport ]]; then
+  sed -i 's/^enabled=.*/enabled=0/' /etc/default/apport
+  systemctl disable --now apport.service >/dev/null 2>&1 || true
+fi
 install -o root -g root -m 0644 \
   "${SCRIPT_DIRECTORY}/labgate-guest.conf" /etc/sysusers.d/labgate-guest.conf
 systemd-sysusers /etc/sysusers.d/labgate-guest.conf
@@ -912,6 +923,8 @@ rm -f -- \
 systemctl enable --now \
   guest-cleanup.timer guest-heartbeat.timer \
   guest-webhook-flush.path guest-webhook-flush.timer
+# Reopen remote issue only once local deadline enforcement is running again.
+rm -f -- /var/lib/labgate/decommissioned
 
 printf 'LabGate machine setup complete for %s (%s); password length is %s.\n' \
   "${machine_name}" "${tailscale_ip}" "${password_length}"
