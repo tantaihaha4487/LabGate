@@ -1,95 +1,76 @@
 # LabGate
 
-LabGate lets students sign in with an <code>@ubu.ac.th</code> Google account, reserve a
-shared physical Ubuntu or Arch-family desktop, and receive a temporary password
-for that machine's existing <code>guest</code> account. The password is typed at the
-physical keyboard. LabGate is not remote-desktop software.
+Reserve shared physical lab desktops with university Google login. LabGate is a Go server with a shadcn/ui student and admin website, a Bubble Tea admin terminal, and Go helpers on each Debian, Ubuntu, or Arch-family desktop.
 
-The web app returns a generated password once and never stores it. Checkout
-rotates the one shared account's password; it never creates or deletes student
-Linux accounts. Read [AGENTS.md](AGENTS.md) before changing that contract.
+## Use it
 
-> [!IMPORTANT]
-> Physical end-to-end checks are a release gate. Review [PROGRESS.md](PROGRESS.md)
-> and complete [recovery and acceptance](docs/recovery.md) before putting a
-> machine into service.
+Extract the release archive matching your Linux machine (`amd64` or `arm64`) and run:
 
-## Start here
+```sh
+./install.sh
+```
 
-Follow the operator path:
+Choose **Server**, **Admin client**, or **Lab machine**. The wizard handles configuration and installation. The server generates secrets and an Ed25519 provisioning key; Google client credentials still come from your university’s Google Cloud project.
 
-1. [Install the Raspberry Pi](docs/install-pi.md)
-2. [Configure OAuth, HTTPS, secrets, and cron](docs/configuration.md)
-3. [Install and enroll a physical lab machine](docs/install-lab-machine.md)
-4. [Deploy a reviewed release](docs/deployment.md)
-5. [Recover and accept machines](docs/recovery.md)
-6. [Decommission everything](docs/uninstall.md)
+For administration, run:
 
-For a Pi-only removal, use [Pi uninstall](docs/pi-uninstall.md).
+```sh
+labgate
+```
 
-## Lifecycle
+First run asks for the server address. Open the displayed pairing page, sign in as a configured administrator, and approve the code shown in your own terminal. The connection and session are saved privately. The admin website remains available at `/admin`.
 
-<code>CREDENTIAL_TTL_HOURS</code> is only the deadline for entering a new password at the
-physical login screen. It does not limit an active desktop session.
+Students open the server website, sign in with their institutional Google account, reserve a desktop, and type its one-time guest password at the physical keyboard.
 
-There is no maximum duration for an active session unless you specify one.
+## Uninstall
 
-| State | Version | Meaning |
-| --- | ---: | --- |
-| <code>pending</code> | 1 | Password issued; no physical PAM session yet. |
-| <code>active</code> | 2 | PAM opened the configured guest home boundary; the machine remains occupied. |
-| <code>revoked</code> | 3 | The exact generation is locked and local cleanup completed. |
+Run `sudo labgate uninstall`. It detects and displays whether this host is a **Server**, **Admin client**, or **Lab machine** from installed service/helper artifacts. The uninstall TUI shows the detected role and removal plan, then asks you to type `uninstall` to confirm. If both server and machine roles are present, select the target in the TUI. Use `--role server` or `--role machine` to select a target for noninteractive commands. Removal runs directly in Go. Preview the detected removal with `sudo labgate uninstall --dry-run`; use `--role server|client|machine --confirm` for noninteractive removal.
 
-The server releases a machine only after an exact generation-3 report or a
-genuinely safe locked, session-free heartbeat. A missed heartbeat, expired
-pending credential, or unreachable host is not proof of safety. Ambiguous
-physical state becomes a persistent <code>safety_hold_credential_id</code> quarantine.
+Server/client removal retains databases, accounts, configuration, keys, and saved client sessions. Machine removal requires a drained endpoint and retains its guest lock, accounts, SSH restrictions, safety helpers, and local state; PAM files are backed up before removing session hooks.
 
-## Architecture
+## Database preparation is separate
 
-~~~text
-Student browser --HTTPS--> Raspberry Pi 5 --Tailscale SSH--> physical desktop
-                              ^                         |
-                              +---- versioned webhooks-+
-~~~
+**Installation, setup, and server startup never create or upgrade database tables.** A missing or incompatible schema keeps the service stopped. The standalone `labgate-migrate` executable owns all schema changes.
 
-The Pi runs Next.js, Better Auth, SQLite/Prisma, and Docker Compose. Machines
-run PAM and systemd lifecycle hooks locally. The <code>provisioner</code> SSH identity is a
-forced-command transport, not a shell; <code>guest</code> cannot use SSH. PAM never makes a
-network call: it completes local safety work, then queues a versioned event in a
-root-controlled outbox. A systemd path unit wakes the separate delivery worker
-immediately, while a 10-second timer remains the retry backstop.
+On a newly installed server:
 
-## Development
+```sh
+sudo -u labgate-server labgate-migrate
+sudo systemctl enable --now labgate
+```
 
-Requirements: Node.js 22+, npm, and SQLite-compatible Prisma dependencies.
+For an existing installation, follow [migration and rollback](docs/migration.md). Stop both the old JavaScript service and any Go writers before migration. Existing identities, reservations, safety holds, and audit history are preserved; users sign in again after the conversion.
 
-~~~sh
-npm install
-cp .env.example .env.local
-npx prisma generate
-npx prisma migrate dev
-npm run dev
-~~~
+## Develop and build
 
-Before a release:
+Requirements: Go 1.27+, Node.js 22.12+ (build only), npm, and Linux. Production needs neither Node.js nor a Go toolchain.
 
-~~~sh
-git diff --check
-npm test
-npm run lint
-npm run typecheck
-npm run build
-~~~
+```sh
+./scripts/build.sh
+```
 
-Keep <code>.env.local</code>, <code>data/</code>, and provisioning keys out of source control. Use
-the [documentation hub](docs/README.md) for operator procedures, and treat
-[PROGRESS.md](PROGRESS.md) as the acceptance tracker.
+This builds the embedded web UI, three local binaries in `bin/`, and self-contained amd64/arm64 release archives in `dist/`. Release archives contain their installer, machine configuration, and checksum manifest. They have not been published to a remote release service.
 
-## Project references
+```sh
+./scripts/check.sh
+```
 
-- [AGENTS.md](AGENTS.md) — binding architecture and security invariants
-- [BUILD_PROMPT.md](BUILD_PROMPT.md) — phased implementation and evidence gates
-- [PROGRESS.md](PROGRESS.md) — current completion and acceptance status
-- [.env.example](.env.example) — configuration template
-- [machine-setup/](machine-setup/) — physical endpoint installer and lifecycle units
+Runs Go tests with the race detector, `go vet`, frontend checks, browser flows, shell syntax checks, and the migration dependency boundary check. Browser tests use an isolated loopback fixture with fake Google sessions and provisioning; it is never included in releases.
+
+Clean generated binaries, release archives, frontend output/caches, and test reports:
+
+```sh
+./scripts/clean.sh
+```
+
+Use `--dry-run` to preview or `--deps` to also remove `web/node_modules`. Source files, databases, secrets, and backups are retained. After cleaning, run `./scripts/build.sh` to rebuild; Go builds require the generated `web/dist` assets.
+
+See [configuration](docs/configuration.md), [machine setup](docs/machines.md), and [recovery and acceptance](docs/recovery.md).
+
+## Safety contract
+
+One existing `guest` OS account serves each physical desktop. Issuing rotates its password; revoking locks the exact credential generation. Guest passwords are never persisted. A login deadline limits only the first login, never an active session. Ambiguous physical state remains occupied with a persistent safety hold until exact terminal evidence or a complete safe heartbeat resolves it.
+
+Machine-side Go executables retain the historical `.sh` entrypoint names to preserve sudoers, forced-command SSH, PAM, and systemd compatibility. Installer glue remains Bash; uninstall runs in Go. Old enrolled machines can report to the Go backend before a drained helper upgrade.
+
+Live university Google login, Raspberry Pi deployment, and physical display-manager/PAM acceptance remain release gates. See [validation evidence](docs/validation.md) for the boundary between automated checks and physical proof.

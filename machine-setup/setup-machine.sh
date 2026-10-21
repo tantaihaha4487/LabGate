@@ -40,37 +40,6 @@ require_command() {
   command -v "$1" >/dev/null || die "required command not found: $1"
 }
 
-quiesce_legacy_outbox_worker() {
-  local active_state enabled_state load_state unit
-
-  # A failed migration must not reboot into the old clock-ordered worker. Leave
-  # both triggers disabled until this installer reaches its normal enable step.
-  systemctl disable --now \
-    guest-webhook-flush.path guest-webhook-flush.timer >/dev/null 2>&1 || true
-  systemctl stop guest-webhook-flush.service >/dev/null 2>&1 || true
-  for unit in guest-webhook-flush.path guest-webhook-flush.timer; do
-    enabled_state=$(systemctl is-enabled "${unit}" 2>/dev/null || true)
-    case "${enabled_state}" in
-      disabled|masked|not-found) ;;
-      *) die "${unit} remains enabled or its enablement state is unknown" ;;
-    esac
-  done
-  for unit in \
-    guest-webhook-flush.path guest-webhook-flush.timer guest-webhook-flush.service; do
-    load_state=$(systemctl show "${unit}" --property=LoadState --value 2>/dev/null) \
-      || die "could not inspect ${unit} before legacy outbox migration"
-    case "${load_state}" in
-      loaded|not-found) ;;
-      *) die "${unit} has an unsafe load state before legacy outbox migration" ;;
-    esac
-    active_state=$(systemctl show "${unit}" --property=ActiveState --value 2>/dev/null) \
-      || die "could not inspect ${unit} activity before legacy outbox migration"
-    case "${active_state}" in
-      inactive|failed) ;;
-      *) die "${unit} is not quiescent for legacy outbox migration" ;;
-    esac
-  done
-}
 
 audit_guest_sudo_boundary() {
   local sudo_audit_expected sudo_audit_hostname sudo_audit_output
@@ -551,35 +520,23 @@ find /lib /usr/lib -type f -name pam_exec.so -print -quit 2>/dev/null | grep -q 
 find /lib /usr/lib -type f -name pam_succeed_if.so -print -quit 2>/dev/null | grep -q . \
   || die "pam_succeed_if.so is required"
 
-for script in \
-  guest-account.sh guest-boot-lock.sh guest-cleanup.sh guest-heartbeat.sh guest-session-hook.sh \
-  guest-webhook-flush.sh labgate-common.sh setup-machine.sh; do
-  bash -n "${SCRIPT_DIRECTORY}/${script}" || die "invalid shell syntax in ${script}"
+for helper in guest-account.sh guest-boot-lock.sh guest-cleanup.sh guest-heartbeat.sh guest-session-hook.sh guest-webhook-flush.sh labgate-provisioner-dispatch.sh labgate-deny-guest-account-change.sh; do
+  [[ -x ${SCRIPT_DIRECTORY}/${helper} ]] || die "missing executable Go helper: ${helper}"
+  [[ $(od -An -tx1 -N4 -- "${SCRIPT_DIRECTORY}/${helper}" | tr -d ' \n') == 7f454c46 ]] || die "helper is not an ELF binary: ${helper}"
 done
-sh -n "${SCRIPT_DIRECTORY}/labgate-provisioner-dispatch.sh" \
-  || die "invalid shell syntax in labgate-provisioner-dispatch.sh"
-sh -n "${SCRIPT_DIRECTORY}/labgate-deny-guest-account-change.sh" \
-  || die "invalid shell syntax in labgate-deny-guest-account-change.sh"
-
+for script in install-machine.sh setup-machine.sh labgate-common.sh labgate-platform.sh; do
+  bash -n "${SCRIPT_DIRECTORY}/${script}" || die "invalid installer glue: ${script}"
+done
 # Inspect the persistent queue with the new parser before changing account,
-# PAM, SSH, or systemd policy. An old queue is migrated only through the
-# explicit drained-maintenance opt-in below; malformed state is never guessed.
+# PAM, SSH, or systemd policy. Old queues require the separate migration
+# script; installation never upgrades queue formats.
 # shellcheck source=labgate-common.sh
 source "${SCRIPT_DIRECTORY}/labgate-common.sh" \
   || die "could not load committed lifecycle library"
 labgate_inventory_outbox \
   || die "unsafe or invalid webhook outbox; preserve it and follow the recovery runbook"
-case "${LABGATE_MIGRATE_LEGACY_OUTBOX:-}" in
-  '') ;;
-  1) ;;
-  *) die "LABGATE_MIGRATE_LEGACY_OUTBOX must be unset or exactly 1" ;;
-esac
-legacy_outbox_migration_required=0
-if (( LABGATE_LEGACY_OUTBOX_COUNT > 0 \
-  || LABGATE_LEGACY_OUTBOX_MIGRATION_COUNT > 0 )); then
-  [[ ${LABGATE_MIGRATE_LEGACY_OUTBOX:-} == 1 ]] \
-    || die "legacy webhook outbox requires a drained update with LABGATE_MIGRATE_LEGACY_OUTBOX=1"
-  legacy_outbox_migration_required=1
+if (( LABGATE_LEGACY_OUTBOX_COUNT > 0 || LABGATE_LEGACY_OUTBOX_MIGRATION_COUNT > 0 )); then
+ die "legacy webhook outbox requires the separate command: sudo bash ${SCRIPT_DIRECTORY}/migrate-outbox.sh; installation never migrates it"
 fi
 
 api_url=${LABGATE_API_URL:-}
@@ -743,6 +700,17 @@ install -o root -g root -m 0644 \
   || die "installed LabGate Polkit rule has unsafe metadata"
 cmp -s -- "${SCRIPT_DIRECTORY}/00-labgate-deny-guest.rules" "${POLKIT_RULE}" \
   || die "installed LabGate Polkit rule differs from the committed artifact"
+# Every student shares the guest UID, so crash memory and per-user journals
+# must not persist where that UID can read them.
+install -d -o root -g root -m 0755 /etc/systemd/coredump.conf.d /etc/systemd/journald.conf.d
+printf '[Coredump]\nStorage=none\nProcessSizeMax=0\n' >/etc/systemd/coredump.conf.d/labgate.conf
+printf '[Journal]\nSplitMode=none\n' >/etc/systemd/journald.conf.d/labgate.conf
+chmod 0644 /etc/systemd/coredump.conf.d/labgate.conf /etc/systemd/journald.conf.d/labgate.conf
+systemctl restart systemd-journald.service || die "systemd-journald did not restart"
+if [[ -f /etc/default/apport ]]; then
+  sed -i 's/^enabled=.*/enabled=0/' /etc/default/apport
+  systemctl disable --now apport.service >/dev/null 2>&1 || true
+fi
 install -o root -g root -m 0644 \
   "${SCRIPT_DIRECTORY}/labgate-guest.conf" /etc/sysusers.d/labgate-guest.conf
 systemd-sysusers /etc/sysusers.d/labgate-guest.conf
@@ -769,17 +737,6 @@ if [[ -n ${existing_guest_home_mode} && ${guest_home_mode} != "${existing_guest_
 fi
 audit_guest_sudo_boundary
 
-if (( legacy_outbox_migration_required == 1 )); then
-  quiesce_legacy_outbox_worker
-  labgate_acquire_lock || die "could not acquire lifecycle lock for legacy outbox migration"
-  labgate_migrate_legacy_outbox \
-    || die "legacy outbox migration failed closed; keep the machine drained and follow the recovery runbook"
-  labgate_inventory_outbox \
-    || die "post-migration webhook outbox validation failed"
-  (( LABGATE_LEGACY_OUTBOX_COUNT == 0 \
-    && LABGATE_LEGACY_OUTBOX_MIGRATION_COUNT == 0 )) \
-    || die "legacy webhook outbox migration did not reach a terminal state"
-fi
 
 for allow_file in /etc/cron.allow /etc/at.allow; do
   remove_exact_policy_entry "${allow_file}" guest
@@ -966,6 +923,8 @@ rm -f -- \
 systemctl enable --now \
   guest-cleanup.timer guest-heartbeat.timer \
   guest-webhook-flush.path guest-webhook-flush.timer
+# Reopen remote issue only once local deadline enforcement is running again.
+rm -f -- /var/lib/labgate/decommissioned
 
 printf 'LabGate machine setup complete for %s (%s); password length is %s.\n' \
   "${machine_name}" "${tailscale_ip}" "${password_length}"

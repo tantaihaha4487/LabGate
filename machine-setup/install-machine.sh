@@ -290,7 +290,7 @@ usage() {
   cat <<'EOF'
 Usage: install-machine.sh [--dry-run] [--local | --commit SHA]
 
-Interactively installs or updates a physical Ubuntu or Arch-family Desktop
+Interactively installs or updates a physical Debian, Ubuntu, or Arch-family desktop
 LabGate endpoint.
 
 Options:
@@ -479,17 +479,13 @@ validate_source_tree() {
     [[ -f ${source_directory}/${file} && ! -L ${source_directory}/${file} ]] \
       || die "source archive is missing a safe machine-side artifact: ${file}"
   done
-  for file in \
-    guest-account.sh guest-boot-lock.sh guest-cleanup.sh guest-heartbeat.sh \
-    guest-session-hook.sh guest-webhook-flush.sh install-machine.sh \
-    labgate-common.sh labgate-platform.sh setup-machine.sh; do
-    bash -n "${source_directory}/${file}" \
-      || die "source archive contains invalid Bash syntax: ${file}"
+  for helper in guest-account.sh guest-boot-lock.sh guest-cleanup.sh guest-heartbeat.sh guest-session-hook.sh guest-webhook-flush.sh labgate-provisioner-dispatch.sh labgate-deny-guest-account-change.sh; do
+    [[ -x ${source_directory}/${helper} ]] || die "missing executable Go helper: ${helper}"
+    [[ $(od -An -tx1 -N4 -- "${source_directory}/${helper}" | tr -d ' \n') == 7f454c46 ]] || die "helper is not an ELF binary: ${helper}"
   done
-  sh -n "${source_directory}/labgate-provisioner-dispatch.sh" \
-    || die "source archive contains an invalid provisioner dispatcher"
-  sh -n "${source_directory}/labgate-deny-guest-account-change.sh" \
-    || die "source archive contains an invalid account-change guard"
+  for script in install-machine.sh setup-machine.sh labgate-common.sh labgate-platform.sh; do
+    bash -n "${source_directory}/${script}" || die "invalid installer glue: ${script}"
+  done
 }
 
 stage_source_tree() {
@@ -502,41 +498,8 @@ stage_source_tree() {
     return
   fi
 
-  require_command curl
-  require_command tar
-  require_command sed
-  if [[ -n ${requested_commit} ]]; then
-    source_revision=${requested_commit}
-  else
-    new_runtime_file api_response
-    curl --fail --silent --show-error \
-      --proto '=https' --tlsv1.2 \
-      --connect-timeout 5 --max-time 20 \
-      --output "${api_response}" \
-      --url "https://api.github.com/repos/${REPOSITORY_OWNER}/${REPOSITORY_NAME}/commits/${DEFAULT_REF}" \
-      || die "could not resolve ${DEFAULT_REF} to an immutable Git commit"
-    source_revision=$(sed -n \
-      's/^[[:space:]]*"sha":[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' \
-      "${api_response}" | sed -n '1p')
-    [[ ${source_revision} =~ ^[0-9a-f]{40}$ ]] \
-      || die "GitHub did not return a canonical commit SHA"
-  fi
+  die "Use the extracted Go release installer with --local; source downloads are not supported."
 
-  new_runtime_file archive
-  mkdir -m 0700 "${runtime_directory}/source"
-  curl --fail --silent --show-error \
-    --proto '=https' --tlsv1.2 \
-    --connect-timeout 5 --max-time 60 \
-    --output "${archive}" \
-    --url "https://codeload.github.com/${REPOSITORY_OWNER}/${REPOSITORY_NAME}/tar.gz/${source_revision}" \
-    || die "could not download the reviewed LabGate source archive"
-  tar -xzf "${archive}" -C "${runtime_directory}/source" --no-same-owner \
-    || die "could not extract the LabGate source archive"
-  extracted_root=$(find "${runtime_directory}/source" \
-    -mindepth 1 -maxdepth 1 -type d -print -quit)
-  [[ -n ${extracted_root} ]] || die "LabGate source archive has no root directory"
-  source_directory=${extracted_root}/machine-setup
-  validate_source_tree
 }
 
 read_safe_config_default() {
@@ -582,21 +545,25 @@ provisioner_authorized_keys_path() {
   printf '%s/.ssh/authorized_keys\n' "${home}"
 }
 
-install_ubuntu_dependencies() {
+install_apt_dependencies() {
   local package
   local -a packages=(
     ca-certificates coreutils curl findutils grep hostname keyutils
     libpam-modules libpam-modules-bin login mawk openssh-client
-    openssh-server passwd policykit-1 procps sudo systemd systemd-sysv tar
+    openssh-server passwd procps sudo systemd systemd-sysv tar
     util-linux
   )
 
+  # Debian 12/13 ship the authority/tooling in polkitd; policykit-1 is a
+  # transitional package and is absent from newer Debian repositories.
+  if [[ ${os_family} == debian ]]; then packages+=(polkitd); else packages+=(policykit-1); fi
+  if labgate_needs_timesyncd; then packages+=(systemd-timesyncd); fi
   require_command apt-get
   run_child_command env DEBIAN_FRONTEND=noninteractive apt-get update \
     || die "apt package-index refresh failed"
   run_child_command env DEBIAN_FRONTEND=noninteractive \
     apt-get install -y --no-install-recommends "${packages[@]}" \
-    || die "Ubuntu prerequisite installation failed"
+    || die "${os_family_label} prerequisite installation failed"
   for package in curl getent hostname keyctl nologin passwd pkaction sshd \
     ssh-keygen systemctl systemd-sysusers timedatectl visudo; do
     require_command "${package}"
@@ -633,23 +600,21 @@ install_arch_dependencies() {
 
 install_platform_dependencies() {
   case "${os_family}" in
-    ubuntu) install_ubuntu_dependencies ;;
+    ubuntu|debian) install_apt_dependencies ;;
     arch) install_arch_dependencies ;;
     *) die "internal unsupported platform selection: ${os_family}" ;;
   esac
 }
 
 ensure_clock_and_ssh() {
-  local synchronized
+  local synchronized ssh_unit
 
-  run_child_command sshd -t || die "OpenSSH configuration is invalid"
-  if systemctl list-unit-files ssh.service >/dev/null 2>&1; then
-    systemctl enable --now ssh.service >/dev/null
-  elif systemctl list-unit-files sshd.service >/dev/null 2>&1; then
-    systemctl enable --now sshd.service >/dev/null
-  else
-    die "OpenSSH Server did not install an SSH service"
+  if (( fresh_install == 1 )); then
+    run_child_command ssh-keygen -A || die "could not generate missing OpenSSH host keys"
   fi
+  run_child_command sshd -t || die "OpenSSH configuration is invalid"
+  ssh_unit=$(labgate_sshd_unit) || die "OpenSSH Server did not install an SSH service"
+  systemctl enable --now "${ssh_unit}" >/dev/null
 
   synchronized=$(timedatectl show --property=NTPSynchronized --value 2>/dev/null || true)
   if [[ ${synchronized} != yes ]]; then
@@ -983,6 +948,11 @@ case "${os_family}" in
     os_family_label='Ubuntu'
     dependency_plan='Install the fixed Ubuntu prerequisites and verify clock/SSH.'
     ;;
+  debian)
+    os_support="${PRETTY_NAME:-Debian} (Debian family) confirmed"
+    os_family_label='Debian'
+    dependency_plan='Install the fixed Debian prerequisites and verify clock/SSH.'
+    ;;
   arch)
     os_support="${PRETTY_NAME:-Arch Linux} (Arch family) confirmed"
     os_family_label='Arch'
@@ -996,7 +966,7 @@ case "${os_family}" in
 esac
 if [[ ${os_family} == unsupported ]]; then
   if (( dry_run == 0 )); then
-    die "the one-shot installer supports Ubuntu and Arch-family desktops only"
+    die "the one-shot installer supports Debian, Ubuntu, and Arch-family desktops only"
   fi
   os_support="unsupported ${PRETTY_NAME:-${ID:-unknown}}; real installation would stop"
 fi
@@ -1196,8 +1166,8 @@ validate_public_key_file_shape "${public_key_file}" \
   || die "provisioner public key must be one plain ssh-ed25519 key"
 key_fingerprint=$(public_key_fingerprint "${public_key_file}") \
   || die "provisioner public key must be one valid Ed25519 key"
-if [[ ${os_family} == ubuntu ]]; then
-  print_stage_success 'Ubuntu prerequisites installed.'
+if [[ ${os_family} == ubuntu || ${os_family} == debian ]]; then
+  print_stage_success "${os_family_label} prerequisites installed."
 else
   print_stage_success 'Arch prerequisites installed; no full system upgrade was run.'
 fi

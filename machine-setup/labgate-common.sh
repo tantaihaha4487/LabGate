@@ -588,7 +588,7 @@ labgate_guest_account_aging_is_nonexpiring() {
     <<<"${record}"
   [[ ${account} == guest \
     && ( -z ${last_change} || ${last_change} =~ ^[0-9]+$ ) \
-    && ${minimum} == 0 \
+    && ( -z ${minimum} || ${minimum} == 0 ) \
     && -z ${maximum} \
     && ${warning} == 0 \
     && -z ${inactive} \
@@ -597,8 +597,11 @@ labgate_guest_account_aging_is_nonexpiring() {
 }
 
 labgate_prepare_guest_login_authentication() {
-  chage --mindays 0 --maxdays -1 --warndays 0 \
-    --inactive -1 --expiredate -1 guest >/dev/null 2>&1 || return 1
+  local help
+  local -a aging=(--maxdays -1 --warndays 0 --inactive -1 --expiredate -1)
+  help=$(chage --help) || return 1
+  if [[ ${help} == *--mindays* ]]; then aging+=(--mindays 0); fi
+  chage "${aging[@]}" guest >/dev/null 2>&1 || return 1
   labgate_guest_account_aging_is_nonexpiring || return 1
   labgate_reset_guest_auth_failure_counters
 }
